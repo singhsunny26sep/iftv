@@ -1,4 +1,4 @@
-package com.iftv
+package com.iftvott
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate

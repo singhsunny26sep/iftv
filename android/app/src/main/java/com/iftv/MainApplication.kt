@@ -1,4 +1,4 @@
-package com.iftv
+package com.iftvott
 
 import android.app.Application
 import com.facebook.react.PackageList

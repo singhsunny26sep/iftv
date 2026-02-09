@@ -19,3 +19,10 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+/*
+Source - https://stackoverflow.com/a
+Posted by Luis Fer Garcia, modified by community. See post 'Timeline' for change history
+Retrieved 2025-11-21, License - CC BY-SA 4.0
+*/
+
+
