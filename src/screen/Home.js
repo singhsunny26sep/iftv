@@ -42,22 +42,62 @@ export default function Home() {
   // API Data States
   const [allMovies, setAllMovies] = useState([])
   const [categories, setCategories] = useState([])
+  const [categoryIds, setCategoryIds] = useState({}) // Map category name to ID
+  const [selectedCategory, setSelectedCategory] = useState('All')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [noDataFound, setNoDataFound] = useState(false)
 
   // Fetch data from API
   useEffect(() => {
     loadData();
   }, []);
 
+  // Fetch movies when category changes
+  useEffect(() => {
+    filterMoviesByCategory(selectedCategory);
+  }, [selectedCategory]);
+
+  // Function to filter movies by category
+  const filterMoviesByCategory = async (category) => {
+    try {
+      setIsLoading(true);
+      setNoDataFound(false);
+      
+      const categoryId = category === 'All' ? null : categoryIds[category];
+      
+      const moviesData = await fetchAllMovies(1, 10, null, null, categoryId);
+      
+      if (moviesData.movies && moviesData.movies.length > 0) {
+        const formattedMovies = moviesData.movies.map(formatMovieForUI);
+        setAllMovies(formattedMovies);
+        setNoDataFound(false);
+      } else {
+        setAllMovies([]);
+        setNoDataFound(true);
+      }
+    } catch (err) {
+      console.error('Error filtering movies:', err);
+      setAllMovies([]);
+      setNoDataFound(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle category selection
+  const handleCategorySelect = (category) => {
+    setSelectedCategory(category);
+  };
+
   const loadData = async () => {
     try {
       setIsLoading(true);
       setError(null);
 
-      // Fetch movies with your specific API parameters
+      // Fetch movies - get all without filters to display all movies
       const [moviesData, categoriesData] = await Promise.allSettled([
-        fetchAllMovies(1, 10, '2025-10-12', 'hindi'),
+        fetchAllMovies(1, 10),
         fetchMovieCategories()
       ]);
 
@@ -75,9 +115,13 @@ export default function Home() {
       // Handle categories
       if (categoriesData.status === 'fulfilled') {
         console.log('Categories API Response:', categoriesData.value);
-        const apiCategories = categoriesData.value.map(cat =>
-          typeof cat === 'string' ? cat : cat.name || cat.title || 'Unknown'
-        );
+        const categoryIdMap = {};
+        const apiCategories = categoriesData.value.map(cat => {
+          const name = cat.name || cat.title || 'Unknown';
+          categoryIdMap[name] = cat._id || cat.id;
+          return name;
+        });
+        setCategoryIds(categoryIdMap);
         setCategories(['All', ...apiCategories]);
       } else {
         console.error('Failed to fetch categories:', categoriesData.reason);
@@ -408,6 +452,7 @@ export default function Home() {
             ref={videoRef}
             source={{
               uri: currentVideo,
+              type: 'hls',
               headers: {
                 'Accept': '*/*',
                 'User-Agent': 'Mozilla/5.0 (compatible; ReactNativeVideo)',
@@ -572,12 +617,13 @@ export default function Home() {
               key={category}
               style={[
                 styles.categoryChip,
-                index === 0 && styles.categoryChipActive
+                selectedCategory === category && styles.categoryChipActive
               ]}
+              onPress={() => handleCategorySelect(category)}
             >
               <Text style={[
                 styles.categoryText,
-                index === 0 && styles.categoryTextActive
+                selectedCategory === category && styles.categoryTextActive
               ]}>
                 {category}
               </Text>
@@ -596,6 +642,7 @@ export default function Home() {
                     ref={homeVideoRef}
                     source={{
                       uri: homePageVideo.videoUrl,
+                      type: 'hls',
                       headers: {
                         'Accept': '*/*',
                         'User-Agent': 'Mozilla/5.0 (compatible; ReactNativeVideo)',
@@ -703,16 +750,28 @@ export default function Home() {
         {/* All Movies Grid */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>All Movies</Text>
+            <Text style={styles.sectionTitle}>
+              {selectedCategory === 'All' ? 'All Movies' : selectedCategory}
+            </Text>
           </View>
-          <FlatList
-            data={allMovies}
-            renderItem={renderPopularItem}
-            keyExtractor={item => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.popularList}
-          />
+          
+          {/* No Data Found Message */}
+          {noDataFound ? (
+            <View style={styles.noDataContainer}>
+              <Icon name="film-outline" size={64} color="#666" />
+              <Text style={styles.noDataText}>No movies found</Text>
+              <Text style={styles.noDataSubtext}>Try selecting a different category</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={allMovies}
+              renderItem={renderPopularItem}
+              keyExtractor={item => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.popularList}
+            />
+          )}
         </View>
 
         {/* API Response Debug Section */}
@@ -979,6 +1038,25 @@ const styles = StyleSheet.create({
   },
   popularList: {
     paddingHorizontal: 20,
+  },
+  // No Data Found Styles
+  noDataContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  noDataText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginTop: 16,
+  },
+  noDataSubtext: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 8,
   },
   popularItem: {
     marginRight: 12,

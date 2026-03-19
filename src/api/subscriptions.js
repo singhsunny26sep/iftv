@@ -3,7 +3,7 @@
 class SubscriptionService {
   async getAllSubscriptions() {
     try {
-      const response = await fetch('https://iftv-ott.onrender.com/iftv-ott/subscriptions/get-all', {
+      const response = await fetch('https://api.fixetservices.com/iftv-ott/subscriptions/get-all', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -35,7 +35,7 @@ class SubscriptionService {
 
   async getSubscriptionById(subscriptionId, token) {
     try {
-      const response = await fetch(`https://iftv-ott.onrender.com/iftv-ott/subscriptions/${subscriptionId}`, {
+      const response = await fetch(`https://api.fixetservices.com/iftv-ott/subscriptions/${subscriptionId}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

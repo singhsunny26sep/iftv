@@ -21,7 +21,7 @@ class AuthService {
 
     try {
       console.log('Sending OTP request for mobile:', mobileNumber);
-      const response = await fetch('https://iftv-ott.onrender.com/iftv-ott/auth/loginOrSignin-with-mobile', {
+      const response = await fetch('https://api.fixetservices.com/iftv-ott/auth/loginOrSignin-with-mobile', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -65,7 +65,7 @@ class AuthService {
   async register(userData) {
     try {
       console.log('Registering user:', userData);
-      const response = await fetch('https://iftv-ott.onrender.com/iftv-ott/auth/register', {
+      const response = await fetch('https://api.fixetservices.com/iftv-ott/auth/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -121,7 +121,7 @@ class AuthService {
         currentScreen: "LANDING"
       };
       console.log(sessionId,"this is sessionId");
-      const apiUrl = 'https://iftv-ott.onrender.com/iftv-ott/auth/verify-otp-mobile';
+      const apiUrl = 'https://api.fixetservices.com/iftv-ott/auth/verify-otp-mobile';
       console.log('Verifying OTP for mobile:', mobileNumber, 'OTP:', otp);
       console.log('API URL:', apiUrl);
       console.log('Request body:', JSON.stringify(requestBody, null, 2));
@@ -202,7 +202,7 @@ class AuthService {
   async getUser(token) {
     try {
       console.log('Fetching user profile with token:', token);
-      const response = await fetch('https://iftv-ott.onrender.com/iftv-ott/users/get', {
+      const response = await fetch('https://api.fixetservices.com/iftv-ott/users/get', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

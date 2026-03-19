@@ -1,8 +1,21 @@
 // Movie and Categories API functions for IFTV
-const BASE_URL = 'https://iftv-ott.onrender.com/iftv-ott';
+import authService from './auth';
+
+const BASE_URL = 'https://api.fixetservices.com/iftv-ott';
+
+// Helper function to get auth token
+const getAuthToken = async () => {
+  try {
+    const userSession = authService.getCurrentUser();
+    return userSession?.authToken || null;
+  } catch (error) {
+    console.error('Error getting auth token:', error);
+    return null;
+  }
+};
 
 // Fetch all movies with pagination and filters
-export async function fetchAllMovies(page = 1, limit = 10, releaseDate = null, languages = null) {
+export async function fetchAllMovies(page = 1, limit = 10, releaseDate = null, languages = null, categoryId = null) {
   try {
     let url = `${BASE_URL}/movies/getAll?page=${page}&limit=${limit}`;
     
@@ -13,13 +26,20 @@ export async function fetchAllMovies(page = 1, limit = 10, releaseDate = null, l
     if (languages) {
       url += `&languages=${languages}`;
     }
+    if (categoryId) {
+      url += `&categoryId=${categoryId}`;
+    }
 
     console.log('Fetching movies from URL:', url);
+
+    // Get auth token from auth service
+    const token = await getAuthToken();
 
     const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
       },
     });
 
@@ -50,31 +70,25 @@ export async function fetchAllMovies(page = 1, limit = 10, releaseDate = null, l
 // Fetch movie categories
 export async function fetchMovieCategories() {
   try {
-    // First try the iftv-ott endpoint
-    let response = await fetch(`${BASE_URL}/categories/getAll`, {
+    // Get auth token
+    const token = await getAuthToken();
+
+    const response = await fetch(`${BASE_URL}/categories/getAll`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
       },
     });
-
-    if (!response.ok) {
-      // Fallback to the original endpoint with prefix
-      response = await fetch(`${BASE_URL}/iftv-ott/categories/getAll`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    }
 
     if (!response.ok) {
       throw new Error(`Failed to fetch categories: ${response.status}`);
     }
 
     const data = await response.json();
+    console.log('Categories API Response:', data);
     
-    // Handle different response structures
+    // Handle the actual API response structure
     if (data.success && data.data) {
       // Check if data.data has the nested data array (pagination structure)
       if (Array.isArray(data.data)) {
@@ -93,8 +107,7 @@ export async function fetchMovieCategories() {
     return [];
   } catch (error) {
     console.error('Error fetching categories:', error);
-    // Return fallback categories
-    return ['Action', 'Comedy', 'Drama', 'Horror', 'Sci-Fi', 'Romance', 'Thriller'];
+    return [];
   }
 }
 

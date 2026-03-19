@@ -73,12 +73,14 @@ export default function MovieDetail({ route, navigation }) {
         >
           <Video
             ref={videoRef}
-            source={{ uri: movie.videoUrl }}
+            source={{ uri: movie.videoUrl, type: 'hls' }}
             style={styles.videoPlayer}
             paused={isVideoPaused}
             resizeMode="contain"
             controls={false}
             repeat={true}
+            onError={(err) => console.log('Video error:', err)}
+            onLoad={(err) => console.log('Video loaded:', err)}
           />
           
           {isVideoPaused && (
