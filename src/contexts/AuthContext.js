@@ -16,7 +16,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const currentUser = authService.getCurrentUser();
       console.log('Current user from authService:', currentUser);
-      
+        
       if (currentUser && currentUser.authToken) {
         console.log('Found stored session with token:', currentUser.authToken);
         

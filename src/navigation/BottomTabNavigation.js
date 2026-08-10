@@ -83,7 +83,7 @@ const ProfileScreen = ({ navigation }) => {
         name: 'Demo User',
         email: 'demo@example.com',
         mobile: '9876543210',
-        profileImage: 'https://via.placeholder.com/100',
+        profileImage: 'https://placehold.co/100',
       });
     } finally {
       setLoading(false);

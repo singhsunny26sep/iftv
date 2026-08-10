@@ -93,7 +93,7 @@ const OTPVerification = ({ navigation, route }) => {
               // but we can also reset the navigation stack for a clean start
               navigation.reset({
                 index: 0,
-                routes: [{ name: 'Home' }],
+                routes: [{ name: 'Main' }],
               });
             },
           },
@@ -135,7 +135,7 @@ const OTPVerification = ({ navigation, route }) => {
 
   // Format mobile number for display (XXXXX XXXXX)
   const formatMobileForDisplay = (number) => {
-    return number.replace(/(\d{5})(\d{5})/, '$1 $XXXXX');
+    return number.replace(/(\d{5})(\d{5})/, '$1 $2');
   };
 
   return (

@@ -1,7 +1,23 @@
 // Movie and Categories API functions for IFTV
 import authService from './auth';
 
-const BASE_URL = 'https://api.fixetservices.com/iftv-ott';
+const BASE_URL = 'https://iftv-ott.onrender.com/iftv-ott';
+
+// Helper to resolve absolute or relative video URLs against the API base
+function resolveVideoUrl(videoUrl) {
+  if (!videoUrl || typeof videoUrl !== 'string') return '';
+  const trimmed = videoUrl.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    if (trimmed.includes('cloudflarestream.com') && trimmed.includes('/watch')) {
+      return trimmed.replace(/\/watch$/, '/manifest/video.m3u8');
+    }
+    return trimmed;
+  }
+  if (trimmed.startsWith('//')) return `https:${trimmed}`;
+  if (trimmed.startsWith('/')) return `${BASE_URL}${trimmed}`;
+  return `${BASE_URL}/${trimmed}`;
+}
 
 // Helper function to get auth token
 const getAuthToken = async () => {
@@ -170,8 +186,8 @@ export function formatMovieForUI(movie) {
   return {
     id: movie._id || movie.id,
     title: movie.title || 'Unknown Title',
-    thumbnail: movie.image || movie.thumbnail || movie.poster || 'https://via.placeholder.com/300x450/4A6BFF/FFFFFF?text=No+Image',
-    videoUrl: movie.video || movie.videoUrl || movie.video_url || '',
+    thumbnail: movie.image || movie.thumbnail || movie.poster || 'https://placehold.co/300x450/4A6BFF/FFFFFF?text=No+Image',
+    videoUrl: resolveVideoUrl(movie.video || movie.videoUrl || movie.video_url || movie.streamingUrl || movie.url || ''),
     rating: movie.rating || movie.imdbRating || 0,
     year: extractYear(movie.releaseDate),
     genre: movie.categoryId || movie.genre || movie.categories?.join(', ') || 'Unknown',

@@ -14,7 +14,7 @@ import {
   ActivityIndicator,
   Alert
 } from 'react-native'
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import Icon from 'react-native-vector-icons/Ionicons'
 import Video from 'react-native-video'
 import { useNavigation } from '@react-navigation/native'
@@ -23,119 +23,295 @@ import {
   fetchMovieCategories,
   formatMovieForUI
 } from '../api/movies'
+import authService from '../api/auth'
 
 const { width, height } = Dimensions.get('window')
+
+// --- Video Player Modal (extracted to module scope to prevent remount loops) ---
+const VideoPlayerModal = ({
+  visible,
+  source,
+  paused,
+  isLoading,
+  videoKey,
+  onClose,
+  onTogglePause,
+  onLoad,
+  onError,
+  onBuffer,
+}) => {
+  if (!source) return null
+
+  return (
+    <Modal
+      animationType="slide"
+      visible={visible}
+      statusBarTranslucent={true}
+      supportedOrientations={['portrait', 'landscape']}
+      onRequestClose={onClose}
+    >
+      <View style={styles.videoContainer}>
+        <TouchableOpacity style={styles.videoCloseButton} onPress={onClose}>
+          <Icon name="close" size={28} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        <View style={styles.videoPlayerContainer}>
+          <Video
+            key={videoKey}
+            source={source}
+            style={styles.videoPlayer}
+            paused={paused}
+            resizeMode="contain"
+            controls={true}
+            repeat={false}
+            muted={false}
+            volume={1.0}
+            rate={1.0}
+            onLoad={onLoad}
+            onError={onError}
+            onBuffer={onBuffer}
+            onLoadStart={() => console.log('⏳ Video load started')}
+          />
+
+          {isLoading && (
+            <View style={styles.videoLoadingContainer}>
+              <ActivityIndicator size="large" color="#4A6BFF" />
+              <Text style={styles.videoLoadingText}>Loading video...</Text>
+            </View>
+          )}
+
+          {!isLoading && paused && (
+            <TouchableOpacity
+              style={styles.playButtonOverlay}
+              onPress={onTogglePause}
+              activeOpacity={0.8}
+            >
+              <View style={styles.playButtonCircle}>
+                <Icon name="play" size={50} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.videoControls}>
+          <TouchableOpacity style={styles.controlButton} onPress={onTogglePause}>
+            <Icon name={paused ? 'play' : 'pause'} size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.controlButton}>
+            <Icon name="heart-outline" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.controlButton}>
+            <Icon name="download-outline" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  )
+}
 
 export default function Home() {
   const navigation = useNavigation()
   const [searchText, setSearchText] = useState('')
   const [showProfile, setShowProfile] = useState(false)
+
+  // Video states
   const [videoVisible, setVideoVisible] = useState(false)
-  const [currentVideo, setCurrentVideo] = useState('')
+  const [videoSource, setVideoSource] = useState(null)
+  const [currentVideoUrl, setCurrentVideoUrl] = useState('')
   const [isVideoPaused, setIsVideoPaused] = useState(false)
   const [isVideoLoading, setIsVideoLoading] = useState(false)
-  const [homeVideoLoaded, setHomeVideoLoaded] = useState(false)
-  const [homeVideoError, setHomeVideoError] = useState(false)
-  const videoRef = useRef(null)
-  const homeVideoRef = useRef(null)
+  const [videoKey, setVideoKey] = useState(0) // used to force remount
 
-  // API Data States
+  // --- Build video source with authentication ---
+  const buildVideoSource = (url) => {
+    if (!url) return null
+    const source = { uri: url }
+
+    // Add Authorization header only for same-origin API requests
+    // (Cloudflare Stream URLs are public and don't need headers)
+    try {
+      const userSession = authService.getCurrentUser() || authService.userSession
+      const token = userSession?.authToken
+      if (token && url && url.includes('iftv-ott.onrender.com')) {
+        source.headers = { Authorization: `Bearer ${token}` }
+      }
+    } catch (e) {
+      console.warn('Auth header not added:', e)
+    }
+
+    return source
+  }
+
+  // --- Play video handler ---
+  const handlePlayVideo = (videoUrl) => {
+    console.log('🎬 Play requested for:', videoUrl)
+
+    if (!videoUrl || videoUrl.trim() === '') {
+      Alert.alert('Error', 'No video URL provided.')
+      return
+    }
+
+    if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
+      Alert.alert('Error', 'Invalid video URL format.')
+      return
+    }
+
+    // Build source with headers
+    const source = buildVideoSource(videoUrl)
+    if (!source) {
+      Alert.alert('Error', 'Could not create video source.')
+      return
+    }
+
+    // Set states and force Video component to remount with new key
+    setCurrentVideoUrl(videoUrl)
+    setVideoSource(source)
+    setVideoKey(prev => prev + 1) // forces remount
+    setIsVideoPaused(false)
+    setIsVideoLoading(true)
+    setVideoVisible(true)
+  }
+
+  // --- Close video ---
+  const closeVideo = () => {
+    setVideoVisible(false)
+    setIsVideoPaused(true)
+    setIsVideoLoading(false)
+    // Release source to free memory
+    setTimeout(() => {
+      setVideoSource(null)
+      setCurrentVideoUrl('')
+    }, 300)
+  }
+
+  // --- Video controls ---
+  const toggleVideoPause = () => {
+    setIsVideoPaused(prev => !prev)
+  }
+
+  // --- Video event handlers ---
+  const handleVideoLoad = () => {
+    console.log('✅ Video loaded successfully')
+    setIsVideoLoading(false)
+  }
+
+  const handleVideoError = (error) => {
+    console.log('❌ Video error:', error)
+    const err = error?.error || error
+    const errorCode = err?.errorCode || err?.code || null
+    console.log('❌ Video error code:', errorCode)
+    console.log('❌ Full error object:', JSON.stringify(error, null, 2))
+
+    let detail = `Error code: ${errorCode || 'unknown'}. Please check your internet connection.`
+    if (errorCode === -1009 || errorCode === -1) detail = 'Network error. Check your connection.'
+    else if (errorCode === -1004 || errorCode === 1004 || errorCode === -1006 || errorCode === 1006) detail = 'URL not reachable or invalid.'
+    else if (errorCode === 1005 || errorCode === 403 || errorCode === 401) detail = 'Access denied. Your session may have expired.'
+    else if (errorCode === -11800 || errorCode === -11801 || errorCode === 2001) detail = 'Video format not supported on this device.'
+    else if (errorCode === -11819 || errorCode === -11850 || errorCode === 2002) detail = 'Stream parsing error.'
+
+    setIsVideoLoading(false)
+
+    Alert.alert(
+      'Playback Error',
+      `Unable to play video. ${detail}`,
+      [
+        { text: 'Close', onPress: closeVideo },
+        { 
+          text: 'Retry', 
+          onPress: () => {
+            closeVideo()
+            // Re‑trigger play after a short delay
+            setTimeout(() => handlePlayVideo(currentVideoUrl), 500)
+          }
+        }
+      ]
+    )
+  }
+
+  const handleVideoBuffer = ({ isBuffering }) => {
+    console.log('⏳ Buffering:', isBuffering)
+    if (isBuffering) setIsVideoLoading(true)
+    else setIsVideoLoading(false)
+  }
+
+  // --- API Data States ---
   const [allMovies, setAllMovies] = useState([])
   const [categories, setCategories] = useState([])
-  const [categoryIds, setCategoryIds] = useState({}) // Map category name to ID
+  const [categoryIds, setCategoryIds] = useState({})
   const [selectedCategory, setSelectedCategory] = useState('All')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
   const [noDataFound, setNoDataFound] = useState(false)
 
-  // Fetch data from API
+  // --- Load data ---
   useEffect(() => {
-    loadData();
-  }, []);
+    loadData()
+  }, [])
 
-  // Fetch movies when category changes
   useEffect(() => {
-    filterMoviesByCategory(selectedCategory);
-  }, [selectedCategory]);
+    filterMoviesByCategory(selectedCategory)
+  }, [selectedCategory, filterMoviesByCategory])
 
-  // Function to filter movies by category
-  const filterMoviesByCategory = async (category) => {
+  const filterMoviesByCategory = useCallback(async (category) => {
     try {
-      setIsLoading(true);
-      setNoDataFound(false);
-      
-      const categoryId = category === 'All' ? null : categoryIds[category];
-      
-      const moviesData = await fetchAllMovies(1, 10, null, null, categoryId);
-      
-      if (moviesData.movies && moviesData.movies.length > 0) {
-        const formattedMovies = moviesData.movies.map(formatMovieForUI);
-        setAllMovies(formattedMovies);
-        setNoDataFound(false);
+      setIsLoading(true)
+      setNoDataFound(false)
+      const categoryId = category === 'All' ? null : categoryIds[category]
+      const moviesData = await fetchAllMovies(1, 10, null, null, categoryId)
+      if (moviesData.movies?.length > 0) {
+        setAllMovies(moviesData.movies.map(formatMovieForUI))
       } else {
-        setAllMovies([]);
-        setNoDataFound(true);
+        setAllMovies([])
+        setNoDataFound(true)
       }
     } catch (err) {
-      console.error('Error filtering movies:', err);
-      setAllMovies([]);
-      setNoDataFound(true);
+      console.error('Filter error:', err)
+      setAllMovies([])
+      setNoDataFound(true)
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }, [categoryIds])
 
-  // Handle category selection
   const handleCategorySelect = (category) => {
-    setSelectedCategory(category);
-  };
+    setSelectedCategory(category)
+  }
 
   const loadData = async () => {
     try {
-      setIsLoading(true);
-      setError(null);
+      setIsLoading(true)
+      setError(null)
 
-      // Fetch movies - get all without filters to display all movies
-      const [moviesData, categoriesData] = await Promise.allSettled([
+      const [moviesRes, categoriesRes] = await Promise.allSettled([
         fetchAllMovies(1, 10),
         fetchMovieCategories()
-      ]);
+      ])
 
-      // Handle movies data
-      if (moviesData.status === 'fulfilled') {
-        console.log('Movies API Response:', moviesData.value);
-        const formattedMovies = moviesData.value.movies.map(formatMovieForUI);
-        console.log('Formatted Movies:', formattedMovies);
-        setAllMovies(formattedMovies);
+      if (moviesRes.status === 'fulfilled') {
+        const formatted = moviesRes.value.movies.map(formatMovieForUI)
+        setAllMovies(formatted)
       } else {
-        console.error('Failed to fetch movies:', moviesData.reason);
-        setError('Failed to fetch movies. Please try again.');
+        setError('Failed to fetch movies.')
       }
 
-      // Handle categories
-      if (categoriesData.status === 'fulfilled') {
-        console.log('Categories API Response:', categoriesData.value);
-        const categoryIdMap = {};
-        const apiCategories = categoriesData.value.map(cat => {
-          const name = cat.name || cat.title || 'Unknown';
-          categoryIdMap[name] = cat._id || cat.id;
-          return name;
-        });
-        setCategoryIds(categoryIdMap);
-        setCategories(['All', ...apiCategories]);
-      } else {
-        console.error('Failed to fetch categories:', categoriesData.reason);
+      if (categoriesRes.status === 'fulfilled') {
+        const map = {}
+        const names = categoriesRes.value.map(cat => {
+          const name = cat.name || cat.title || 'Unknown'
+          map[name] = cat._id || cat.id
+          return name
+        })
+        setCategoryIds(map)
+        setCategories(['All', ...names])
       }
-
     } catch (err) {
-      console.error('Error loading data:', err);
-      setError('Failed to load content. Please try again.');
+      setError('Something went wrong.')
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
-  // User profile data
+  // --- User profile (dummy) ---
   const userProfile = {
     name: 'John Doe',
     email: 'john.doe@example.com',
@@ -143,143 +319,17 @@ export default function Home() {
     joinDate: 'January 2024',
     watchHistory: 47,
     favorites: 23,
-    profileImage: 'https://via.placeholder.com/100x100/4A6BFF/FFFFFF?text=JD'
+    profileImage: 'https://placehold.co/100x100/4A6BFF/FFFFFF?text=JD'
   }
 
-  // Get the first movie for home page video
+  // --- Get featured movie ---
   const getHomePageVideo = () => {
-    if (allMovies && allMovies.length > 0) {
-      return allMovies[0];
-    }
-    return null;
-  };
-
-  const homePageVideo = getHomePageVideo();
-
-  const handlePlayVideo = (videoUrl) => {
-    console.log('Attempting to play video:', videoUrl);
-
-    if (!videoUrl || videoUrl === '') {
-      Alert.alert('Error', 'No video URL available for this movie.');
-      return;
-    }
-
-    // Validate video URL format
-    if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
-      Alert.alert('Error', 'Invalid video URL format.');
-      return;
-    }
-
-    setIsVideoLoading(true);
-    setCurrentVideo(videoUrl);
-    setVideoVisible(true);
-    setIsVideoPaused(false);
-
-    // Test video URL accessibility
-    testVideoUrl(videoUrl);
+    if (allMovies.length > 0) return allMovies[0]
+    return null
   }
+  const homePageVideo = getHomePageVideo()
 
-  const testVideoUrl = async (videoUrl) => {
-    try {
-      const response = await fetch(videoUrl, { method: 'HEAD' });
-      console.log('Video URL test response:', response.status);
-      if (!response.ok) {
-        console.warn('Video URL might not be accessible:', response.status);
-      }
-    } catch (error) {
-      console.warn('Video URL test failed:', error);
-    }
-  }
-
-  const testVideoManually = async (videoUrl) => {
-    console.log('Manual video test:', videoUrl);
-    try {
-      const response = await fetch(videoUrl, { method: 'GET' });
-      console.log('Manual test response:', response.status, response.statusText);
-      if (response.ok) {
-        Alert.alert('Success', 'Video URL is accessible!');
-      } else {
-        Alert.alert('Error', `Video URL returned status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('Manual test failed:', error);
-      Alert.alert('Error', `Failed to access video URL: ${error.message}`);
-    }
-  }
-
-  const closeVideo = () => {
-    setVideoVisible(false);
-    setCurrentVideo('');
-    setIsVideoPaused(true);
-    setIsVideoLoading(false);
-  }
-
-  const toggleVideoPause = () => {
-    setIsVideoPaused(!isVideoPaused);
-  }
-
-  const handleVideoLoad = () => {
-    console.log('Video loaded successfully');
-    setIsVideoLoading(false);
-  }
-
-  const handleVideoError = (error) => {
-    console.log('Video error details:', error);
-    console.log('Current video URL:', currentVideo);
-    setIsVideoLoading(false);
-
-    let errorMessage = 'Unable to play video. ';
-    if (error.error && error.error.errorCode === -2) {
-      errorMessage += 'This video format is not supported.';
-    } else if (error.error && error.error.errorCode === -1) {
-      errorMessage += 'Network error. Please check your internet connection.';
-    } else {
-      errorMessage += 'Please check your internet connection and try again.';
-    }
-
-    Alert.alert(
-      'Playback Error',
-      errorMessage,
-      [
-        { text: 'OK', onPress: closeVideo },
-        {
-          text: 'Retry', onPress: () => {
-            closeVideo();
-            setTimeout(() => handlePlayVideo(currentVideo), 1000);
-          }
-        }
-      ]
-    );
-  }
-
-  const handleVideoBuffer = ({ isBuffering }) => {
-    console.log('Video buffering:', isBuffering);
-  }
-
-  // Home page video handlers
-  const handleHomeVideoLoad = () => {
-    console.log('Home page video loaded successfully');
-    setHomeVideoLoaded(true);
-    setHomeVideoError(false);
-
-    // Auto-play the video after a short delay to ensure it's ready
-    setTimeout(() => {
-      if (homeVideoRef.current) {
-        homeVideoRef.current.resume();
-      }
-    }, 500);
-  }
-
-  const handleHomeVideoError = (error) => {
-    console.log('Home page video error:', error);
-    setHomeVideoError(true);
-    setHomeVideoLoaded(false);
-  }
-
-  const handleHomeVideoProgress = (progress) => {
-    console.log('Home video progress:', progress.currentTime);
-  }
-
+  // --- Render helpers ---
   const renderFeaturedItem = ({ item }) => (
     <View style={styles.featuredItem}>
       <Image source={{ uri: item.thumbnail }} style={styles.featuredImage} />
@@ -340,7 +390,7 @@ export default function Home() {
     </TouchableOpacity>
   )
 
-  // Profile Modal Component
+  // --- Profile Modal ---
   const ProfileModal = () => (
     <Modal
       animationType="slide"
@@ -350,33 +400,21 @@ export default function Home() {
     >
       <View style={styles.modalContainer}>
         <View style={styles.profileContainer}>
-          {/* Header */}
           <View style={styles.profileHeader}>
             <Text style={styles.profileTitle}>My Profile</Text>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setShowProfile(false)}
-            >
+            <TouchableOpacity style={styles.closeButton} onPress={() => setShowProfile(false)}>
               <Icon name="close" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
-
-          {/* Profile Info */}
           <View style={styles.profileInfo}>
-            <Image
-              source={{ uri: userProfile.profileImage }}
-              style={styles.profileLargeImage}
-            />
+            <Image source={{ uri: userProfile.profileImage }} style={styles.profileLargeImage} />
             <Text style={styles.userName}>{userProfile.name}</Text>
             <Text style={styles.userEmail}>{userProfile.email}</Text>
-
             <View style={styles.membershipBadge}>
               <Icon name="diamond" size={16} color="#FFD700" />
               <Text style={styles.membershipText}>{userProfile.membership} Member</Text>
             </View>
           </View>
-
-          {/* Stats */}
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{userProfile.watchHistory}</Text>
@@ -391,35 +429,28 @@ export default function Home() {
               <Text style={styles.statLabel}>Watchlist</Text>
             </View>
           </View>
-
-          {/* Menu Options */}
           <View style={styles.menuContainer}>
             <TouchableOpacity style={styles.menuItem}>
               <Icon name="person-outline" size={20} color="#FFFFFF" />
               <Text style={styles.menuText}>Edit Profile</Text>
               <Icon name="chevron-forward" size={16} color="#666" />
             </TouchableOpacity>
-
             <TouchableOpacity style={styles.menuItem}>
               <Icon name="heart-outline" size={20} color="#FFFFFF" />
               <Text style={styles.menuText}>My Favorites</Text>
               <Icon name="chevron-forward" size={16} color="#666" />
             </TouchableOpacity>
-
             <TouchableOpacity style={styles.menuItem}>
               <Icon name="download-outline" size={20} color="#FFFFFF" />
               <Text style={styles.menuText}>Downloads</Text>
               <Icon name="chevron-forward" size={16} color="#666" />
             </TouchableOpacity>
-
             <TouchableOpacity style={styles.menuItem}>
               <Icon name="settings-outline" size={20} color="#FFFFFF" />
               <Text style={styles.menuText}>Settings</Text>
               <Icon name="chevron-forward" size={16} color="#666" />
             </TouchableOpacity>
           </View>
-
-          {/* Logout Button */}
           <TouchableOpacity style={styles.logoutButton}>
             <Icon name="log-out-outline" size={20} color="#FF6B6B" />
             <Text style={styles.logoutText}>Log Out</Text>
@@ -429,128 +460,19 @@ export default function Home() {
     </Modal>
   )
 
-  // Video Player Modal - UPDATED VERSION
-  const VideoPlayerModal = () => (
-    <Modal
-      animationType="slide"
-      visible={videoVisible}
-      statusBarTranslucent={true}
-      supportedOrientations={['portrait', 'landscape']}
-    >
-      <View style={styles.videoContainer}>
-        {/* Close Button */}
-        <TouchableOpacity
-          style={styles.videoCloseButton}
-          onPress={closeVideo}
-        >
-          <Icon name="close" size={28} color="#FFFFFF" />
-        </TouchableOpacity>
-
-        {/* Video Player */}
-        <View style={styles.videoPlayerContainer}>
-          <Video
-            ref={videoRef}
-            source={{
-              uri: currentVideo,
-              type: 'hls',
-              headers: {
-                'Accept': '*/*',
-                'User-Agent': 'Mozilla/5.0 (compatible; ReactNativeVideo)',
-              }
-            }}
-            style={styles.videoPlayer}
-            paused={isVideoPaused}
-            resizeMode="contain"
-            controls={true}
-            repeat={false}
-            muted={false}
-            volume={1.0}
-            rate={1.0}
-            poster="https://via.placeholder.com/300x200/4A6BFF/FFFFFF?text=Loading+Video"
-            posterResizeMode="cover"
-            onLoad={handleVideoLoad}
-            onError={handleVideoError}
-            onBuffer={handleVideoBuffer}
-            onLoadStart={() => console.log('Video load started')}
-            onProgress={(progress) => console.log('Video progress:', progress)}
-            ignoreSilentSwitch="obey"
-            playWhenInactive={false}
-            playInBackground={false}
-            bufferConfig={{
-              minBufferMs: 15000,
-              maxBufferMs: 50000,
-              bufferForPlaybackMs: 2500
-            }}
-            progressUpdateInterval={1000}
-            selectedAudioTrack={{
-              type: "auto",
-            }}
-            selectedTextTrack={{
-              type: "auto",
-            }}
-          />
-
-          {/* Loading Indicator */}
-          {isVideoLoading && (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#4A6BFF" />
-              <Text style={styles.loadingText}>Loading video...</Text>
-            </View>
-          )}
-
-          {/* Custom Play/Pause Overlay */}
-          {!isVideoLoading && isVideoPaused && (
-            <TouchableOpacity
-              style={styles.playButtonOverlay}
-              onPress={toggleVideoPause}
-              activeOpacity={0.8}
-            >
-              <View style={styles.playButtonCircle}>
-                <Icon name="play" size={50} color="#FFFFFF" />
-              </View>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Custom Video Controls */}
-        <View style={styles.videoControls}>
-          <TouchableOpacity
-            style={styles.controlButton}
-            onPress={toggleVideoPause}
-          >
-            <Icon
-              name={isVideoPaused ? "play" : "pause"}
-              size={24}
-              color="#FFFFFF"
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.controlButton}>
-            <Icon name="heart-outline" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.controlButton}>
-            <Icon name="download-outline" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  )
-
-  // Loading state
+  // --- Loading / Error states ---
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#0F0F1E" />
-        <View style={styles.loadingContainer}>
+        <View style={styles.mainLoadingContainer}>
           <ActivityIndicator size="large" color="#4A6BFF" />
-          <Text style={styles.loadingText}>Loading movies...</Text>
+          <Text style={styles.mainLoadingText}>Loading movies...</Text>
         </View>
       </SafeAreaView>
-    );
+    )
   }
 
-  // Error state
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
@@ -563,9 +485,10 @@ export default function Home() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
-    );
+    )
   }
 
+  // --- Main Render ---
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0F0F1E" />
@@ -582,17 +505,12 @@ export default function Home() {
           <TouchableOpacity style={styles.iconButton}>
             <Icon name="notifications-outline" size={24} color="#FFFFFF" />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.profileButton}
-            onPress={() => setShowProfile(true)}
-          >
-            <Image
-              source={{ uri: userProfile.profileImage }}
-              style={styles.profileImage}
-            />
+          <TouchableOpacity style={styles.profileButton} onPress={() => setShowProfile(true)}>
+            <Image source={{ uri: userProfile.profileImage }} style={styles.profileImage} />
           </TouchableOpacity>
         </View>
       </View>
+
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Search Bar */}
         <View style={styles.searchContainer}>
@@ -611,8 +529,9 @@ export default function Home() {
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.categoriesContainer}
+          nestedScrollEnabled={true}
         >
-          {categories.map((category, index) => (
+          {categories.map((category) => (
             <TouchableOpacity
               key={category}
               style={[
@@ -631,62 +550,20 @@ export default function Home() {
           ))}
         </ScrollView>
 
-        {/* Home Page Video Player */}
+        {/* Home Page Video Feature */}
         {homePageVideo && homePageVideo.videoUrl ? (
           <View style={styles.homeVideoSection}>
             <Text style={styles.homeVideoTitle}>Now Playing</Text>
-            <View style={styles.homeVideoContainer}>
-              {!homeVideoError ? (
-                <>
-                  <Video
-                    ref={homeVideoRef}
-                    source={{
-                      uri: homePageVideo.videoUrl,
-                      type: 'hls',
-                      headers: {
-                        'Accept': '*/*',
-                        'User-Agent': 'Mozilla/5.0 (compatible; ReactNativeVideo)',
-                      }
-                    }}
-                    style={styles.homeVideoPlayer}
-                    controls={true}
-                    resizeMode="cover"
-                    paused={false}
-                    repeat={false}
-                    muted={false}
-                    volume={1.0}
-                    rate={1.0}
-                    onLoad={handleHomeVideoLoad}
-                    onError={handleHomeVideoError}
-                    onBuffer={handleVideoBuffer}
-                    onLoadStart={() => console.log('Home video load started')}
-                    onProgress={handleHomeVideoProgress}
-                    ignoreSilentSwitch="obey"
-                    playWhenInactive={false}
-                    playInBackground={false}
-                    bufferConfig={{
-                      minBufferMs: 15000,
-                      maxBufferMs: 50000,
-                      bufferForPlaybackMs: 2500
-                    }}
-                  />
-
-                  {/* Loading overlay for home video */}
-                  {!homeVideoLoaded && !homeVideoError && (
-                    <View style={styles.homeVideoLoadingOverlay}>
-                      <ActivityIndicator size="large" color="#4A6BFF" />
-                      <Text style={styles.homeVideoLoadingText}>Loading video...</Text>
-                    </View>
-                  )}
-                </>
-              ) : (
-                <View style={styles.homeVideoErrorContainer}>
-                  <Icon name="alert-circle-outline" size={48} color="#FF6B6B" />
-                  <Text style={styles.homeVideoErrorText}>Unable to load video</Text>
-                  <Text style={styles.homeVideoErrorSubtext}>Please check your internet connection</Text>
-                </View>
-              )}
-            </View>
+            <TouchableOpacity
+              style={styles.homeVideoContainer}
+              onPress={() => handlePlayVideo(homePageVideo.videoUrl)}
+              activeOpacity={0.9}
+            >
+              <Image source={{ uri: homePageVideo.thumbnail }} style={styles.homeVideoThumbnail} />
+              <View style={styles.homeVideoPlayOverlay}>
+                <Icon name="play-circle" size={64} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
             <View style={styles.homeVideoInfo}>
               <Text style={styles.homeVideoMovieTitle}>{homePageVideo.title}</Text>
               <Text style={styles.homeVideoDescription}>{homePageVideo.description}</Text>
@@ -701,7 +578,6 @@ export default function Home() {
             </View>
           </View>
         ) : (
-          /* Fallback when no video is available */
           <View style={styles.homeVideoSection}>
             <Text style={styles.homeVideoTitle}>Featured Content</Text>
             <View style={styles.homeVideoContainer}>
@@ -724,7 +600,7 @@ export default function Home() {
           </View>
         )}
 
-        {/* Movies Section */}
+        {/* Latest Movies */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Latest Movies</Text>
@@ -744,6 +620,7 @@ export default function Home() {
             showsHorizontalScrollIndicator={false}
             snapToInterval={width - 40}
             decelerationRate="fast"
+            nestedScrollEnabled={true}
           />
         </View>
 
@@ -754,8 +631,6 @@ export default function Home() {
               {selectedCategory === 'All' ? 'All Movies' : selectedCategory}
             </Text>
           </View>
-          
-          {/* No Data Found Message */}
           {noDataFound ? (
             <View style={styles.noDataContainer}>
               <Icon name="film-outline" size={64} color="#666" />
@@ -770,40 +645,10 @@ export default function Home() {
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.popularList}
+              nestedScrollEnabled={true}
             />
           )}
         </View>
-
-        {/* API Response Debug Section */}
-        {__DEV__ && allMovies.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Debug: API Data</Text>
-            </View>
-            <View style={styles.debugContainer}>
-              <Text style={styles.debugText}>
-                Total Movies: {allMovies.length}
-              </Text>
-              {allMovies.map((movie, index) => (
-                <View key={movie.id} style={styles.debugMovieItem}>
-                  <Text style={styles.debugMovieTitle}>{index + 1}. {movie.title}</Text>
-                  <Text style={styles.debugMovieDetail}>ID: {movie.id}</Text>
-                  <Text style={styles.debugMovieDetail}>Year: {movie.year}</Text>
-                  <Text style={styles.debugMovieDetail}>Duration: {movie.duration}</Text>
-                  <Text style={styles.debugMovieDetail}>Rating: {movie.rating}</Text>
-                  <Text style={styles.debugMovieDetail}>Languages: {movie.languages?.join(', ')}</Text>
-                  <Text style={styles.debugMovieDetail}>Video URL: {movie.videoUrl ? movie.videoUrl.substring(0, 50) + '...' : 'Not Available'}</Text>
-                  <TouchableOpacity
-                    style={styles.testVideoButton}
-                    onPress={() => testVideoManually(movie.videoUrl)}
-                  >
-                    <Text style={styles.testVideoButtonText}>Test Video URL</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
 
         {/* Continue Watching */}
         <View style={styles.section}>
@@ -821,15 +666,25 @@ export default function Home() {
         </View>
       </ScrollView>
 
-      {/* Profile Modal */}
+      {/* Modals */}
       <ProfileModal />
-
-      {/* Video Player Modal */}
-      <VideoPlayerModal />
+      <VideoPlayerModal
+        visible={videoVisible}
+        source={videoSource}
+        paused={isVideoPaused}
+        isLoading={isVideoLoading}
+        videoKey={videoKey}
+        onClose={closeVideo}
+        onTogglePause={toggleVideoPause}
+        onLoad={handleVideoLoad}
+        onError={handleVideoError}
+        onBuffer={handleVideoBuffer}
+      />
     </SafeAreaView>
   )
 }
 
+// ---- Styles (unchanged, keep as provided) ----
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1039,7 +894,6 @@ const styles = StyleSheet.create({
   popularList: {
     paddingHorizontal: 20,
   },
-  // No Data Found Styles
   noDataContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1087,7 +941,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
   },
-  // Profile Modal Styles
   modalContainer: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -1208,7 +1061,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
-  // Video Player Styles - UPDATED
   videoContainer: {
     flex: 1,
     backgroundColor: '#000000',
@@ -1233,14 +1085,14 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#000000',
   },
-  loadingContainer: {
+  videoLoadingContainer: {
     position: 'absolute',
     top: '50%',
     left: '50%',
     transform: [{ translateX: -50 }, { translateY: -50 }],
     alignItems: 'center',
   },
-  loadingText: {
+  videoLoadingText: {
     color: '#FFFFFF',
     marginTop: 10,
     fontSize: 16,
@@ -1279,14 +1131,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 25,
   },
-  // Loading and Error States
-  loadingContainer: {
+  mainLoadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#0F0F1E',
   },
-  loadingText: {
+  mainLoadingText: {
     color: '#FFFFFF',
     marginTop: 15,
     fontSize: 16,
@@ -1316,7 +1167,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  // Home Page Video Styles
   homeVideoSection: {
     marginBottom: 30,
     paddingHorizontal: 20,
@@ -1335,9 +1185,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A1A2E',
     marginBottom: 15,
   },
-  homeVideoPlayer: {
+  homeVideoThumbnail: {
     width: '100%',
     height: '100%',
+  },
+  homeVideoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
   homeVideoInfo: {
     paddingHorizontal: 5,
@@ -1367,41 +1227,6 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 14,
     marginLeft: 15,
-  },
-  // Home Video Loading and Error Styles
-  homeVideoLoadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(15, 15, 30, 0.8)',
-  },
-  homeVideoLoadingText: {
-    color: '#FFFFFF',
-    marginTop: 10,
-    fontSize: 16,
-  },
-  homeVideoErrorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1A1A2E',
-  },
-  homeVideoErrorText: {
-    color: '#FF6B6B',
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 10,
-    textAlign: 'center',
-  },
-  homeVideoErrorSubtext: {
-    color: '#888',
-    fontSize: 14,
-    marginTop: 5,
-    textAlign: 'center',
   },
   homeVideoFallbackContainer: {
     flex: 1,
@@ -1435,7 +1260,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  // Debug Styles
+  // Debug styles (optional – remove if not needed)
   debugContainer: {
     backgroundColor: '#1A1A2E',
     margin: 20,
@@ -1464,17 +1289,5 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 12,
     marginBottom: 2,
-  },
-  testVideoButton: {
-    backgroundColor: '#4A6BFF',
-    padding: 8,
-    borderRadius: 6,
-    marginTop: 8,
-    alignItems: 'center',
-  },
-  testVideoButtonText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
   },
 })
