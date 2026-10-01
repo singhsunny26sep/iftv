@@ -6,12 +6,12 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   Dimensions,
   Modal,
   Share
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Video from 'react-native-video';
 const { width } = Dimensions.get('window');

@@ -21,7 +21,7 @@ class AuthService {
 
     try {
       console.log('Sending OTP request for mobile:', mobileNumber);
-      const response = await fetch('https://iftv-ott.onrender.com/iftv-ott/auth/loginOrSignin-with-mobile', {
+      const response = await fetch('https://iftv.nvsricemart.com/iftv-ott/auth/loginOrSignin-with-mobile', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -65,7 +65,7 @@ class AuthService {
   async register(userData) {
     try {
       console.log('Registering user:', userData);
-      const response = await fetch('https://iftv-ott.onrender.com/iftv-ott/auth/register', {
+      const response = await fetch('https://iftv.nvsricemart.com/iftv-ott/auth/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -121,7 +121,7 @@ class AuthService {
         currentScreen: "LANDING"
       };
       console.log(sessionId,"this is sessionId");
-      const apiUrl = 'https://iftv-ott.onrender.com/iftv-ott/auth/verify-otp-mobile';
+      const apiUrl = 'https://iftv.nvsricemart.com/iftv-ott/auth/verify-otp-mobile';
       console.log('Verifying OTP for mobile:', mobileNumber, 'OTP:', otp);
       console.log('API URL:', apiUrl);
       console.log('Request body:', JSON.stringify(requestBody, null, 2));
@@ -186,6 +186,21 @@ class AuthService {
   getCurrentUser() {
     return this.userSession;
   }
+  // Merge profile fields into the stored session
+  updateCurrentUser(updates) {
+    if (!this.userSession) {
+      return null;
+    }
+    this.userSession = {
+      ...this.userSession,
+      ...updates,
+      user: {
+        ...(this.userSession.user || {}),
+        ...updates,
+      },
+    };
+    return this.userSession;
+  }
 
   // Logout (clear session)
   logout() {
@@ -202,7 +217,7 @@ class AuthService {
   async getUser(token) {
     try {
       console.log('Fetching user profile with token:', token);
-      const response = await fetch('https://iftv-ott.onrender.com/iftv-ott/users/get', {
+      const response = await fetch('https://iftv.nvsricemart.com/iftv-ott/users/get', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -213,7 +228,6 @@ class AuthService {
       console.log('Get user response status:', response.status);
       const responseText = await response.text();
       console.log('Get user response text:', responseText);
-
       let data;
       try {
         data = JSON.parse(responseText);
@@ -221,7 +235,6 @@ class AuthService {
         console.error('Failed to parse JSON:', e);
         throw new Error('Invalid JSON response from server');
       }
-
       if (response.ok) {
         return {
           success: true,
@@ -236,6 +249,5 @@ class AuthService {
     }
   }
 }
-
 // Export singleton instance
 export default new AuthService();

@@ -1,7 +1,7 @@
 // Movie and Categories API functions for IFTV
 import authService from './auth';
 
-const BASE_URL = 'https://iftv-ott.onrender.com/iftv-ott';
+const BASE_URL = 'https://iftv.nvsricemart.com/iftv-ott';
 
 // Helper to resolve absolute or relative video URLs against the API base
 function resolveVideoUrl(videoUrl) {
@@ -86,9 +86,8 @@ export async function fetchAllMovies(page = 1, limit = 10, releaseDate = null, l
 // Fetch movie categories
 export async function fetchMovieCategories() {
   try {
-    // Get auth token
+    // Get auth token123
     const token = await getAuthToken();
-
     const response = await fetch(`${BASE_URL}/categories/getAll`, {
       method: 'GET',
       headers: {
@@ -96,17 +95,12 @@ export async function fetchMovieCategories() {
         'Authorization': token ? `Bearer ${token}` : ''
       },
     });
-
     if (!response.ok) {
       throw new Error(`Failed to fetch categories: ${response.status}`);
     }
-
     const data = await response.json();
     console.log('Categories API Response:', data);
-    
-    // Handle the actual API response structure
     if (data.success && data.data) {
-      // Check if data.data has the nested data array (pagination structure)
       if (Array.isArray(data.data)) {
         return data.data;
       } else if (data.data.data && Array.isArray(data.data.data)) {

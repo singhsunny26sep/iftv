@@ -157,6 +157,26 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Merge locally edited profile fields into the current session
+  // The backend exposes no profile-update endpoint yet, so the values are
+  // merged on top of the last known server response and re-fetched on refresh.
+  const updateProfile = (updates) => {
+    if (!updates || typeof updates !== 'object') {
+      return { success: false, error: 'Nothing to update' };
+    }
+    try {
+      const session = authService.getCurrentUser();
+      if (session) {
+        authService.updateCurrentUser(updates);
+      }
+      setUser(prev => (prev ? { ...prev, ...updates } : prev));
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
   const value = {
     user,
     loading,
@@ -165,6 +185,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     checkAuth,
     refreshUser,
+    updateProfile,
   };
 
   return (

@@ -8,6 +8,12 @@ import LoginScreen from '../screen/LoginScreen';
 import OTPVerification from '../screen/OTPVerification';
 import TokenConsoleScreen from '../screen/TokenConsoleScreen';
 import SubscriptionScreen from '../screen/SubscriptionScreen';
+import EditProfileScreen from '../screen/EditProfileScreen';
+import WatchHistoryScreen from '../screen/WatchHistoryScreen';
+import FavoritesScreen from '../screen/FavoritesScreen';
+import NotificationsScreen from '../screen/NotificationsScreen';
+import HelpSupportScreen from '../screen/HelpSupportScreen';
+import LiveStreamingScreen from '../screen/LiveStreamingScreen';
 import { useAuth } from '../contexts/AuthContext';
 import BottomTabNavigation from './BottomTabNavigation';
 
@@ -40,6 +46,38 @@ function AppNavigation() {
     <Stack.Screen 
         name="Subscription" 
         component={SubscriptionScreen} 
+        options={{headerShown: false}}
+      />
+
+      {/* Profile Section Screens */}
+      <Stack.Screen
+        name="EditProfile"
+        component={EditProfileScreen}
+        options={{headerShown: false}}
+      />
+      <Stack.Screen
+        name="WatchHistory"
+        component={WatchHistoryScreen}
+        options={{headerShown: false}}
+      />
+      <Stack.Screen
+        name="Favorites"
+        component={FavoritesScreen}
+        options={{headerShown: false}}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={NotificationsScreen}
+        options={{headerShown: false}}
+      />
+      <Stack.Screen
+        name="HelpSupport"
+        component={HelpSupportScreen}
+        options={{headerShown: false}}
+      />
+      <Stack.Screen
+        name="LiveStreaming"
+        component={LiveStreamingScreen}
         options={{headerShown: false}}
       />
     </Stack.Navigator>

@@ -6,235 +6,252 @@ import {
   Image,
   TouchableOpacity,
   FlatList,
-  SafeAreaView,
   StatusBar,
   TextInput,
   Dimensions,
   Modal,
   ActivityIndicator,
-  Alert
+  Alert,
+  Platform,
+  Animated,
+  Easing,
+  RefreshControl,
 } from 'react-native'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import LinearGradient from 'react-native-linear-gradient'
 import Icon from 'react-native-vector-icons/Ionicons'
-import Video from 'react-native-video'
 import { useNavigation } from '@react-navigation/native'
 import {
   fetchAllMovies,
   fetchMovieCategories,
   formatMovieForUI
 } from '../api/movies'
-import authService from '../api/auth'
+import { usePlayer } from '../contexts/PlayerContext'
+import { SafeAreaView } from 'react-native-safe-area-context'
 
 const { width, height } = Dimensions.get('window')
+const isTV = Platform.OS === 'android'
+const isTablet = width >= 768
+const isSmallPhone = width < 375
 
-// --- Video Player Modal (extracted to module scope to prevent remount loops) ---
-const VideoPlayerModal = ({
-  visible,
-  source,
-  paused,
-  isLoading,
-  videoKey,
-  onClose,
-  onTogglePause,
-  onLoad,
-  onError,
-  onBuffer,
-}) => {
-  if (!source) return null
+// Responsive sizing functions
+const responsiveWidth = (percentage) => (width * percentage) / 100
+const responsiveHeight = (percentage) => (height * percentage) / 100
+const getFontSize = (size) => {
+  if (isTablet) return size * 1.2
+  if (isSmallPhone) return size * 0.85
+  return size
+}
+
+// --- Premium OTT Style Category Chip ---
+const CategoryChip = ({ category, isSelected, onPress }) => {
+  const scaleAnim = useRef(new Animated.Value(1)).current
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.92,
+      friction: 3,
+      tension: 40,
+      useNativeDriver: true,
+    }).start()
+  }
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      friction: 3,
+      tension: 40,
+      useNativeDriver: true,
+    }).start()
+  }
 
   return (
-    <Modal
-      animationType="slide"
-      visible={visible}
-      statusBarTranslucent={true}
-      supportedOrientations={['portrait', 'landscape']}
-      onRequestClose={onClose}
-    >
-      <View style={styles.videoContainer}>
-        <TouchableOpacity style={styles.videoCloseButton} onPress={onClose}>
-          <Icon name="close" size={28} color="#FFFFFF" />
-        </TouchableOpacity>
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity
+        style={[
+          styles.categoryChip,
+          isSelected && styles.categoryChipActive,
+        ]}
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        activeOpacity={0.9}
+        focusable={isTV}
+      >
+        <Text style={[
+          styles.categoryText,
+          isSelected && styles.categoryTextActive,
+        ]}>
+          {category}
+        </Text>
+        {isSelected && <View style={styles.categoryActiveIndicator} />}
+      </TouchableOpacity>
+    </Animated.View>
+  )
+}
 
-        <View style={styles.videoPlayerContainer}>
-          <Video
-            key={videoKey}
-            source={source}
-            style={styles.videoPlayer}
-            paused={paused}
-            resizeMode="contain"
-            controls={true}
-            repeat={false}
-            muted={false}
-            volume={1.0}
-            rate={1.0}
-            onLoad={onLoad}
-            onError={onError}
-            onBuffer={onBuffer}
-            onLoadStart={() => console.log('⏳ Video load started')}
-          />
+// --- OTT Style Movie Card ---
+const MovieCard = ({ item, onPlay, size = 'medium' }) => {
+  const scaleAnim = useRef(new Animated.Value(1)).current
+  const overlayAnim = useRef(new Animated.Value(0)).current
 
-          {isLoading && (
-            <View style={styles.videoLoadingContainer}>
-              <ActivityIndicator size="large" color="#4A6BFF" />
-              <Text style={styles.videoLoadingText}>Loading video...</Text>
-            </View>
-          )}
+  const cardWidth = size === 'large'
+    ? isTablet ? responsiveWidth(55) : responsiveWidth(78)
+    : isTablet ? responsiveWidth(24) : responsiveWidth(34)
+  const cardHeight = size === 'large'
+    ? isTablet ? 300 : 240
+    : isTablet ? 190 : 150
 
-          {!isLoading && paused && (
-            <TouchableOpacity
-              style={styles.playButtonOverlay}
-              onPress={onTogglePause}
-              activeOpacity={0.8}
-            >
-              <View style={styles.playButtonCircle}>
-                <Icon name="play" size={50} color="#FFFFFF" />
-              </View>
-            </TouchableOpacity>
-          )}
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.96,
+      friction: 3,
+      tension: 40,
+      useNativeDriver: true,
+    }).start()
+    Animated.timing(overlayAnim, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start()
+  }
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      friction: 3,
+      tension: 40,
+      useNativeDriver: true,
+    }).start()
+    Animated.timing(overlayAnim, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start()
+  }
+
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity
+        style={[styles.movieCard, { width: cardWidth }]}
+        onPress={() => onPlay(item)}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        activeOpacity={0.9}
+        focusable={isTV}
+      >
+        <Image
+          source={{ uri: item.thumbnail }}
+          style={[styles.movieImage, { height: cardHeight }]}
+        />
+
+        {/* Always visible bottom gradient */}
+        <LinearGradient
+          colors={['transparent', 'transparent', 'rgba(0,0,0,0.85)']}
+          style={styles.movieBottomGradient}
+        />
+
+        {/* Rating badge */}
+        <View style={styles.movieBadge}>
+          <Icon name="star" size={10} color="#FFD700" />
+          <Text style={styles.movieRating}>{item.rating || 'N/A'}</Text>
         </View>
 
-        <View style={styles.videoControls}>
-          <TouchableOpacity style={styles.controlButton} onPress={onTogglePause}>
-            <Icon name={paused ? 'play' : 'pause'} size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.controlButton}>
-            <Icon name="heart-outline" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.controlButton}>
-            <Icon name="download-outline" size={24} color="#FFFFFF" />
+        {/* Hover overlay with play button */}
+        <Animated.View style={[styles.movieOverlay, { opacity: overlayAnim }]}>
+          <LinearGradient
+            colors={['rgba(108,99,255,0.25)', 'rgba(0,0,0,0.55)']}
+            style={styles.movieGradient}
+          />
+          <View style={styles.moviePlayButton}>
+            <LinearGradient
+              colors={['#6C63FF', '#4A3FF5']}
+              style={styles.playButtonMini}
+            >
+              <Icon name="play" size={20} color="#FFFFFF" />
+            </LinearGradient>
+          </View>
+        </Animated.View>
+
+        {/* Title - Always visible */}
+        <View style={styles.movieTitleContainer}>
+          <Text style={styles.movieSmallTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
+          {size === 'large' && (
+            <Text style={styles.movieSubtitle} numberOfLines={1}>
+              {item.year} • {item.duration || 'HD'}
+            </Text>
+          )}
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  )
+}
+
+// --- OTT Style Hero Section ---
+const HeroSection = ({ movie, onPlay }) => {
+  if (!movie) return null
+
+  return (
+    <View style={styles.heroContainer}>
+      <Image source={{ uri: movie.thumbnail }} style={styles.heroImage} />
+      <LinearGradient
+        colors={['transparent', 'rgba(10,14,39,0.95)', 'rgba(10,14,39,1)']}
+        style={styles.heroGradient}
+      />
+      <View style={styles.heroContent}>
+        <View style={styles.heroBadge}>
+          <Text style={styles.heroBadgeText}>🔥 Trending Now</Text>
+        </View>
+        <Text style={styles.heroTitle} numberOfLines={2}>{movie.title}</Text>
+        <Text style={styles.heroDescription} numberOfLines={2}>
+          {movie.description}
+        </Text>
+        <View style={styles.heroMeta}>
+          <View style={styles.heroRating}>
+            <Icon name="star" size={16} color="#FFD700" />
+            <Text style={styles.heroRatingText}>{movie.rating}</Text>
+          </View>
+          <Text style={styles.heroMetaText}>{movie.year}</Text>
+          <Text style={styles.heroMetaText}>{movie.duration}</Text>
+          <View style={styles.heroHD}>
+            <Text style={styles.heroHDText}>HD</Text>
+          </View>
+        </View>
+        <View style={styles.heroButtons}>
+          <TouchableOpacity
+            style={styles.heroPlayButton}
+              onPress={() => onPlay(movie)}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={['#6C63FF', '#4A3FF5']}
+                style={styles.heroPlayGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+            <Icon name="play" size={20} color="#FFFFFF" />
+            <Text style={styles.heroPlayText}>Watch Now</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+          <TouchableOpacity style={styles.heroInfoButton} activeOpacity={0.8}>
+            <Icon name="information-circle-outline" size={24} color="#FFFFFF" />
+            <Text style={styles.heroInfoText}>Info</Text>
           </TouchableOpacity>
         </View>
       </View>
-    </Modal>
+    </View>
   )
 }
 
 export default function Home() {
   const navigation = useNavigation()
+  const { playMovie } = usePlayer()
   const [searchText, setSearchText] = useState('')
-  const [showProfile, setShowProfile] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
-  // Video states
-  const [videoVisible, setVideoVisible] = useState(false)
-  const [videoSource, setVideoSource] = useState(null)
-  const [currentVideoUrl, setCurrentVideoUrl] = useState('')
-  const [isVideoPaused, setIsVideoPaused] = useState(false)
-  const [isVideoLoading, setIsVideoLoading] = useState(false)
-  const [videoKey, setVideoKey] = useState(0) // used to force remount
-
-  // --- Build video source with authentication ---
-  const buildVideoSource = (url) => {
-    if (!url) return null
-    const source = { uri: url }
-
-    // Add Authorization header only for same-origin API requests
-    // (Cloudflare Stream URLs are public and don't need headers)
-    try {
-      const userSession = authService.getCurrentUser() || authService.userSession
-      const token = userSession?.authToken
-      if (token && url && url.includes('iftv-ott.onrender.com')) {
-        source.headers = { Authorization: `Bearer ${token}` }
-      }
-    } catch (e) {
-      console.warn('Auth header not added:', e)
-    }
-
-    return source
-  }
-
-  // --- Play video handler ---
-  const handlePlayVideo = (videoUrl) => {
-    console.log('🎬 Play requested for:', videoUrl)
-
-    if (!videoUrl || videoUrl.trim() === '') {
-      Alert.alert('Error', 'No video URL provided.')
-      return
-    }
-
-    if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
-      Alert.alert('Error', 'Invalid video URL format.')
-      return
-    }
-
-    // Build source with headers
-    const source = buildVideoSource(videoUrl)
-    if (!source) {
-      Alert.alert('Error', 'Could not create video source.')
-      return
-    }
-
-    // Set states and force Video component to remount with new key
-    setCurrentVideoUrl(videoUrl)
-    setVideoSource(source)
-    setVideoKey(prev => prev + 1) // forces remount
-    setIsVideoPaused(false)
-    setIsVideoLoading(true)
-    setVideoVisible(true)
-  }
-
-  // --- Close video ---
-  const closeVideo = () => {
-    setVideoVisible(false)
-    setIsVideoPaused(true)
-    setIsVideoLoading(false)
-    // Release source to free memory
-    setTimeout(() => {
-      setVideoSource(null)
-      setCurrentVideoUrl('')
-    }, 300)
-  }
-
-  // --- Video controls ---
-  const toggleVideoPause = () => {
-    setIsVideoPaused(prev => !prev)
-  }
-
-  // --- Video event handlers ---
-  const handleVideoLoad = () => {
-    console.log('✅ Video loaded successfully')
-    setIsVideoLoading(false)
-  }
-
-  const handleVideoError = (error) => {
-    console.log('❌ Video error:', error)
-    const err = error?.error || error
-    const errorCode = err?.errorCode || err?.code || null
-    console.log('❌ Video error code:', errorCode)
-    console.log('❌ Full error object:', JSON.stringify(error, null, 2))
-
-    let detail = `Error code: ${errorCode || 'unknown'}. Please check your internet connection.`
-    if (errorCode === -1009 || errorCode === -1) detail = 'Network error. Check your connection.'
-    else if (errorCode === -1004 || errorCode === 1004 || errorCode === -1006 || errorCode === 1006) detail = 'URL not reachable or invalid.'
-    else if (errorCode === 1005 || errorCode === 403 || errorCode === 401) detail = 'Access denied. Your session may have expired.'
-    else if (errorCode === -11800 || errorCode === -11801 || errorCode === 2001) detail = 'Video format not supported on this device.'
-    else if (errorCode === -11819 || errorCode === -11850 || errorCode === 2002) detail = 'Stream parsing error.'
-
-    setIsVideoLoading(false)
-
-    Alert.alert(
-      'Playback Error',
-      `Unable to play video. ${detail}`,
-      [
-        { text: 'Close', onPress: closeVideo },
-        { 
-          text: 'Retry', 
-          onPress: () => {
-            closeVideo()
-            // Re‑trigger play after a short delay
-            setTimeout(() => handlePlayVideo(currentVideoUrl), 500)
-          }
-        }
-      ]
-    )
-  }
-
-  const handleVideoBuffer = ({ isBuffering }) => {
-    console.log('⏳ Buffering:', isBuffering)
-    if (isBuffering) setIsVideoLoading(true)
-    else setIsVideoLoading(false)
-  }
-
-  // --- API Data States ---
+  // API Data States
   const [allMovies, setAllMovies] = useState([])
   const [categories, setCategories] = useState([])
   const [categoryIds, setCategoryIds] = useState({})
@@ -243,21 +260,79 @@ export default function Home() {
   const [error, setError] = useState(null)
   const [noDataFound, setNoDataFound] = useState(false)
 
-  // --- Load data ---
-  useEffect(() => {
-    loadData()
-  }, [])
+  // Animation values
+  const fadeAnim = useRef(new Animated.Value(0)).current
+  const headerOpacity = useRef(new Animated.Value(0)).current
+  const scrollY = useRef(new Animated.Value(0)).current
+
+  // ============================================================
+  // ✅ UNIQUE DATA DISTRIBUTION - No Repetition
+  // ============================================================
+  const sections = useMemo(() => {
+    const movies = allMovies || []
+
+    // Fisher-Yates shuffle for variety
+    const shuffle = (arr) => {
+      const a = [...arr]
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[a[i], a[j]] = [a[j], a[i]]
+      }
+      return a
+    }
+
+    const heroMovie = movies[0] || null
+
+    // Remove hero from pool so it doesn't repeat
+    const pool = movies.slice(1)
+
+    // Split pool into unique non-overlapping chunks
+    const continueWatching = pool.slice(0, 5)
+    const trending = pool.slice(5, 11)
+    const allMoviesList = pool.slice(11, 20)
+    const remaining = pool.slice(20)
+    const popular = remaining.length >= 4 ? shuffle(remaining).slice(0, 8) : shuffle(pool).slice(0, 6)
+
+    return {
+      heroMovie,
+      continueWatching,
+      trending,
+      allMoviesList: allMoviesList.length > 0 ? allMoviesList : pool.slice(0, 6),
+      popular,
+    }
+  }, [allMovies])
 
   useEffect(() => {
-    filterMoviesByCategory(selectedCategory)
-  }, [selectedCategory, filterMoviesByCategory])
+    loadData()
+
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+        easing: Easing.ease,
+      }),
+      Animated.timing(headerOpacity, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+        easing: Easing.ease,
+      }),
+    ]).start()
+  }, [fadeAnim, headerOpacity])
+
+  useEffect(() => {
+    if (Object.keys(categoryIds).length > 0) {
+      filterMoviesByCategory(selectedCategory)
+    }
+  }, [selectedCategory, categoryIds, filterMoviesByCategory])
 
   const filterMoviesByCategory = useCallback(async (category) => {
     try {
       setIsLoading(true)
       setNoDataFound(false)
       const categoryId = category === 'All' ? null : categoryIds[category]
-      const moviesData = await fetchAllMovies(1, 10, null, null, categoryId)
+      const moviesData = await fetchAllMovies(1, 20, null, null, categoryId)
       if (moviesData.movies?.length > 0) {
         setAllMovies(moviesData.movies.map(formatMovieForUI))
       } else {
@@ -283,8 +358,8 @@ export default function Home() {
       setError(null)
 
       const [moviesRes, categoriesRes] = await Promise.allSettled([
-        fetchAllMovies(1, 10),
-        fetchMovieCategories()
+        fetchAllMovies(1, 20),
+        fetchMovieCategories(),
       ])
 
       if (moviesRes.status === 'fulfilled') {
@@ -296,7 +371,7 @@ export default function Home() {
 
       if (categoriesRes.status === 'fulfilled') {
         const map = {}
-        const names = categoriesRes.value.map(cat => {
+        const names = categoriesRes.value.map((cat) => {
           const name = cat.name || cat.title || 'Unknown'
           map[name] = cat._id || cat.id
           return name
@@ -311,399 +386,368 @@ export default function Home() {
     }
   }
 
-  // --- User profile (dummy) ---
-  const userProfile = {
-    name: 'John Doe',
-    email: 'john.doe@example.com',
-    membership: 'Premium',
-    joinDate: 'January 2024',
-    watchHistory: 47,
-    favorites: 23,
-    profileImage: 'https://placehold.co/100x100/4A6BFF/FFFFFF?text=JD'
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await loadData()
+    setRefreshing(false)
+  }, [])
+
+  // Playback lives in PlayerContext so the Play tab renders the same session.
+  const handlePlayMovie = (movie) => {
+    if (!movie) {
+      Alert.alert('Error', 'No movie selected.')
+      return
+    }
+    const videoUrl = movie.videoUrl || movie.url || movie.video
+    if (!videoUrl || videoUrl.trim() === '') {
+      Alert.alert('Error', 'No video URL available for this title.')
+      return
+    }
+    const started = playMovie(movie)
+    if (!started) {
+      Alert.alert('Error', 'Could not start playback for this title.')
+      return
+    }
+    navigation.navigate('Playing')
   }
 
-  // --- Get featured movie ---
-  const getHomePageVideo = () => {
-    if (allMovies.length > 0) return allMovies[0]
-    return null
-  }
-  const homePageVideo = getHomePageVideo()
-
-  // --- Render helpers ---
-  const renderFeaturedItem = ({ item }) => (
-    <View style={styles.featuredItem}>
-      <Image source={{ uri: item.thumbnail }} style={styles.featuredImage} />
-      <View style={styles.featuredContent}>
-        <Text style={styles.featuredTitle}>{item.title}</Text>
-        <View style={styles.featuredInfo}>
-          <View style={styles.ratingContainer}>
-            <Icon name="star" size={16} color="#FFD700" />
-            <Text style={styles.ratingText}>{item.rating}</Text>
-          </View>
-          <Text style={styles.featuredMeta}>{item.year} • {item.genre} • {item.duration}</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.playButton}
-          onPress={() => handlePlayVideo(item.videoUrl)}
-        >
-          <Icon name="play" size={20} color="#FFFFFF" />
-          <Text style={styles.playButtonText}>Watch Now</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  )
-
-  const renderTrendingItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.trendingItem}
-      onPress={() => handlePlayVideo(item.videoUrl)}
-    >
-      <Image source={{ uri: item.thumbnail }} style={styles.trendingImage} />
-      <View style={styles.trendingOverlay}>
-        <View style={styles.ratingBadge}>
-          <Icon name="star" size={12} color="#FFD700" />
-          <Text style={styles.ratingBadgeText}>{item.rating}</Text>
-        </View>
-      </View>
-      <View style={styles.playIconOverlay}>
-        <Icon name="play-circle" size={40} color="#FFFFFF" />
-      </View>
-      <Text style={styles.trendingTitle} numberOfLines={2}>{item.title}</Text>
-    </TouchableOpacity>
-  )
-
-  const renderPopularItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.popularItem}
-      onPress={() => handlePlayVideo(item.videoUrl)}
-    >
-      <Image source={{ uri: item.thumbnail }} style={styles.popularImage} />
-      <View style={styles.popularOverlay}>
-        <View style={styles.ratingBadge}>
-          <Icon name="star" size={12} color="#FFD700" />
-          <Text style={styles.ratingBadgeText}>{item.rating}</Text>
-        </View>
-      </View>
-      <View style={styles.playIconOverlaySmall}>
-        <Icon name="play-circle" size={30} color="#FFFFFF" />
-      </View>
-    </TouchableOpacity>
-  )
-
-  // --- Profile Modal ---
-  const ProfileModal = () => (
-    <Modal
-      animationType="slide"
-      transparent={true}
-      visible={showProfile}
-      onRequestClose={() => setShowProfile(false)}
-    >
-      <View style={styles.modalContainer}>
-        <View style={styles.profileContainer}>
-          <View style={styles.profileHeader}>
-            <Text style={styles.profileTitle}>My Profile</Text>
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowProfile(false)}>
-              <Icon name="close" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.profileInfo}>
-            <Image source={{ uri: userProfile.profileImage }} style={styles.profileLargeImage} />
-            <Text style={styles.userName}>{userProfile.name}</Text>
-            <Text style={styles.userEmail}>{userProfile.email}</Text>
-            <View style={styles.membershipBadge}>
-              <Icon name="diamond" size={16} color="#FFD700" />
-              <Text style={styles.membershipText}>{userProfile.membership} Member</Text>
-            </View>
-          </View>
-          <View style={styles.statsContainer}>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{userProfile.watchHistory}</Text>
-              <Text style={styles.statLabel}>Watched</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{userProfile.favorites}</Text>
-              <Text style={styles.statLabel}>Favorites</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>12</Text>
-              <Text style={styles.statLabel}>Watchlist</Text>
-            </View>
-          </View>
-          <View style={styles.menuContainer}>
-            <TouchableOpacity style={styles.menuItem}>
-              <Icon name="person-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.menuText}>Edit Profile</Text>
-              <Icon name="chevron-forward" size={16} color="#666" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem}>
-              <Icon name="heart-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.menuText}>My Favorites</Text>
-              <Icon name="chevron-forward" size={16} color="#666" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem}>
-              <Icon name="download-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.menuText}>Downloads</Text>
-              <Icon name="chevron-forward" size={16} color="#666" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem}>
-              <Icon name="settings-outline" size={20} color="#FFFFFF" />
-              <Text style={styles.menuText}>Settings</Text>
-              <Icon name="chevron-forward" size={16} color="#666" />
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity style={styles.logoutButton}>
-            <Icon name="log-out-outline" size={20} color="#FF6B6B" />
-            <Text style={styles.logoutText}>Log Out</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  )
-
-  // --- Loading / Error states ---
-  if (isLoading) {
+  // --- Loading state ---
+  if (isLoading && allMovies.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#0F0F1E" />
+        <StatusBar barStyle="light-content" backgroundColor="#0a0e27" />
         <View style={styles.mainLoadingContainer}>
-          <ActivityIndicator size="large" color="#4A6BFF" />
+          <ActivityIndicator size="large" color="#6C63FF" />
           <Text style={styles.mainLoadingText}>Loading movies...</Text>
         </View>
       </SafeAreaView>
     )
   }
 
+  // --- Error state ---
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#0F0F1E" />
+        <StatusBar barStyle="light-content" backgroundColor="#0a0e27" />
         <View style={styles.errorContainer}>
           <Icon name="alert-circle-outline" size={64} color="#FF6B6B" />
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={loadData}>
-            <Text style={styles.retryButtonText}>Try Again</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={loadData}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#6C63FF', '#4A3FF5']}
+              style={styles.retryGradient}
+            >
+              <Text style={styles.retryButtonText}>Try Again</Text>
+            </LinearGradient>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     )
   }
 
+  const { heroMovie, continueWatching, trending, allMoviesList, popular } = sections
+
   // --- Main Render ---
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F0F1E" />
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
 
-      {/* Header */}
-      <View style={styles.header}>
+      {/* Floating Header */}
+      <Animated.View style={[styles.floatingHeader, { opacity: headerOpacity }]}>
         <View style={styles.headerLeft}>
-          <Text style={styles.logo}>IFTV HUB</Text>
+          <LinearGradient
+            colors={['#6C63FF', '#4A3FF5']}
+            style={styles.logoGradient}
+          >
+           <Image source={require('../assets/Images/logo.png')} style={styles.logos} />
+          </LinearGradient>
+          <Text style={styles.logo}>IFTV</Text>
         </View>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.iconButton}>
-            <Icon name="search" size={24} color="#FFFFFF" />
+          <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.7}>
+            <Icon name="search" size={isSmallPhone ? 20 : 22} color="#FFFFFF" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Icon name="notifications-outline" size={24} color="#FFFFFF" />
+          <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.7}>
+            <Icon
+              name="notifications-outline"
+              size={isSmallPhone ? 20 : 22}
+              color="#FFFFFF"
+            />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.profileButton} onPress={() => setShowProfile(true)}>
-            <Image source={{ uri: userProfile.profileImage }} style={styles.profileImage} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <Icon name="search" size={20} color="#666" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search movies, TV shows..."
-            placeholderTextColor="#666"
-            value={searchText}
-            onChangeText={setSearchText}
-          />
-        </View>
-
-        {/* Categories */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoriesContainer}
-          nestedScrollEnabled={true}
-        >
-          {categories.map((category) => (
-            <TouchableOpacity
-              key={category}
+          <TouchableOpacity style={styles.profileButton} activeOpacity={0.7}>
+            <Image
+              source={{
+                uri: 'https://placehold.co/100x100/6C63FF/FFFFFF?text=U',
+              }}
               style={[
-                styles.categoryChip,
-                selectedCategory === category && styles.categoryChipActive
+                styles.profileImage,
+                {
+                  width: isSmallPhone ? 32 : 36,
+                  height: isSmallPhone ? 32 : 36,
+                  borderRadius: isSmallPhone ? 16 : 18,
+                },
               ]}
-              onPress={() => handleCategorySelect(category)}
-            >
-              <Text style={[
-                styles.categoryText,
-                selectedCategory === category && styles.categoryTextActive
-              ]}>
-                {category}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+            />
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
 
-        {/* Home Page Video Feature */}
-        {homePageVideo && homePageVideo.videoUrl ? (
-          <View style={styles.homeVideoSection}>
-            <Text style={styles.homeVideoTitle}>Now Playing</Text>
-            <TouchableOpacity
-              style={styles.homeVideoContainer}
-              onPress={() => handlePlayVideo(homePageVideo.videoUrl)}
-              activeOpacity={0.9}
-            >
-              <Image source={{ uri: homePageVideo.thumbnail }} style={styles.homeVideoThumbnail} />
-              <View style={styles.homeVideoPlayOverlay}>
-                <Icon name="play-circle" size={64} color="#FFFFFF" />
-              </View>
-            </TouchableOpacity>
-            <View style={styles.homeVideoInfo}>
-              <Text style={styles.homeVideoMovieTitle}>{homePageVideo.title}</Text>
-              <Text style={styles.homeVideoDescription}>{homePageVideo.description}</Text>
-              <View style={styles.homeVideoMeta}>
-                <View style={styles.ratingContainer}>
-                  <Icon name="star" size={16} color="#FFD700" />
-                  <Text style={styles.ratingText}>{homePageVideo.rating}</Text>
-                </View>
-                <Text style={styles.homeVideoDuration}>{homePageVideo.duration}</Text>
-                <Text style={styles.homeVideoYear}>{homePageVideo.year}</Text>
-              </View>
-            </View>
-          </View>
+      <Animated.ScrollView
+        style={[styles.scrollView, { opacity: fadeAnim }]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#6C63FF"
+            colors={['#6C63FF']}
+          />
+        }
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: true }
+        )}
+        scrollEventThrottle={16}
+      >
+        {/* ===== Hero Section ===== */}
+        {heroMovie && heroMovie.videoUrl ? (
+          <HeroSection movie={heroMovie} onPlay={handlePlayMovie} />
         ) : (
-          <View style={styles.homeVideoSection}>
-            <Text style={styles.homeVideoTitle}>Featured Content</Text>
-            <View style={styles.homeVideoContainer}>
-              <View style={styles.homeVideoFallbackContainer}>
-                <Icon name="play-circle-outline" size={64} color="#4A6BFF" />
-                <Text style={styles.homeVideoFallbackTitle}>Welcome to IFTV</Text>
-                <Text style={styles.homeVideoFallbackText}>Discover amazing movies and shows</Text>
-                <TouchableOpacity
-                  style={styles.browseButton}
-                  onPress={() => navigation.navigate('MovieList', {
-                    movies: allMovies,
-                    title: 'Browse All',
-                    source: 'api'
-                  })}
+          <View style={styles.heroFallback}>
+            <LinearGradient
+              colors={['#1a1f4e', '#0a0e27']}
+              style={styles.heroFallbackGradient}
+            >
+              <Icon name="play-circle-outline" size={64} color="#6C63FF" />
+              <Text style={styles.heroFallbackTitle}>Welcome to IFTV</Text>
+              <Text style={styles.heroFallbackText}>
+                Discover amazing movies and shows
+              </Text>
+              <TouchableOpacity
+                style={styles.heroFallbackButton}
+                onPress={() => navigation.navigate('MovieList')}
+              >
+                <LinearGradient
+                  colors={['#6C63FF', '#4A3FF5']}
+                  style={styles.heroFallbackGradientButton}
                 >
-                  <Text style={styles.browseButtonText}>Browse Movies</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+                  <Text style={styles.heroFallbackButtonText}>Browse Movies</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </LinearGradient>
           </View>
         )}
 
-        {/* Latest Movies */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Latest Movies</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('MovieList', {
-              movies: allMovies,
-              title: 'Latest Movies',
-              source: 'api'
-            })}>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={allMovies}
-            renderItem={renderFeaturedItem}
-            keyExtractor={item => item.id}
+        {/* ===== Live TV banner ===== */}
+        <TouchableOpacity
+          style={styles.liveBanner}
+          onPress={() => navigation.navigate('LiveStreaming')}
+          activeOpacity={0.85}
+        >
+          <LinearGradient
+            colors={['#E03131', '#7A1F2B']}
+            style={styles.liveBannerGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <LinearGradient
+              colors={['rgba(255,255,255,0.12)', 'transparent']}
+              style={styles.liveBannerSheen}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            />
+
+            <View style={styles.liveBannerLeft}>
+              <View style={styles.liveBannerBadge}>
+                <View style={styles.liveBannerDot} />
+                <Text style={styles.liveBannerBadgeText}>LIVE</Text>
+              </View>
+              <Text style={styles.liveBannerTitle}>Live TV</Text>
+              <Text style={styles.liveBannerSubtitle}>
+                Channels broadcasting right now
+              </Text>
+            </View>
+
+            <View style={styles.liveBannerIcon}>
+              <Icon name="tv" size={isTablet ? 30 : 26} color="#FFFFFF" />
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* ===== Categories ===== */}
+        <View style={styles.categoriesWrapper}>
+          <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            snapToInterval={width - 40}
-            decelerationRate="fast"
             nestedScrollEnabled={true}
-          />
+          >
+            {categories.map((category) => (
+              <CategoryChip
+                key={category}
+                category={category}
+                isSelected={selectedCategory === category}
+                onPress={() => handleCategorySelect(category)}
+              />
+            ))}
+          </ScrollView>
         </View>
 
-        {/* All Movies Grid */}
+        {/* ===== Continue Watching (unique data) ===== */}
+        {continueWatching.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <View style={styles.sectionAccent} />
+                <Text style={styles.sectionTitle}>Continue Watching</Text>
+              </View>
+            </View>
+            <FlatList
+              data={continueWatching}
+              renderItem={({ item }) => (
+                <MovieCard item={item} onPlay={handlePlayMovie} size="large" />
+              )}
+              keyExtractor={(item) => `cw-${item.id}`}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.cardList}
+              nestedScrollEnabled={true}
+            />
+          </View>
+        )}
+
+        {/* ===== Trending Now (unique data) ===== */}
+        {trending.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <View style={styles.sectionAccent} />
+                <Text style={styles.sectionTitle}>🔥 Trending Now</Text>
+              </View>
+              <TouchableOpacity activeOpacity={0.7}>
+                <Text style={styles.seeAllText}>See All →</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={trending}
+              renderItem={({ item }) => (
+                <MovieCard item={item} onPlay={handlePlayMovie} size="medium" />
+              )}
+              keyExtractor={(item) => `tr-${item.id}`}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.cardList}
+              nestedScrollEnabled={true}
+            />
+          </View>
+        )}
+
+        {/* ===== All / Selected Category (unique data) ===== */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>
-              {selectedCategory === 'All' ? 'All Movies' : selectedCategory}
-            </Text>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionAccent} />
+              <Text style={styles.sectionTitle}>
+                {selectedCategory === 'All' ? '🎬 All Movies' : selectedCategory}
+              </Text>
+            </View>
+            <TouchableOpacity activeOpacity={0.7}>
+              <Text style={styles.seeAllText}>See All →</Text>
+            </TouchableOpacity>
           </View>
           {noDataFound ? (
             <View style={styles.noDataContainer}>
-              <Icon name="film-outline" size={64} color="#666" />
+              <Icon name="film-outline" size={48} color="#6B7280" />
               <Text style={styles.noDataText}>No movies found</Text>
-              <Text style={styles.noDataSubtext}>Try selecting a different category</Text>
+              <Text style={styles.noDataSubtext}>
+                Try selecting a different category
+              </Text>
             </View>
           ) : (
             <FlatList
-              data={allMovies}
-              renderItem={renderPopularItem}
-              keyExtractor={item => item.id}
+              data={allMoviesList}
+              renderItem={({ item }) => (
+                <MovieCard item={item} onPlay={handlePlayMovie} size="small" />
+              )}
+              keyExtractor={(item) => `all-${item.id}`}
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.popularList}
+              contentContainerStyle={styles.cardList}
               nestedScrollEnabled={true}
             />
           )}
         </View>
 
-        {/* Continue Watching */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Continue Watching</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>See All</Text>
-            </TouchableOpacity>
+        {/* ===== Popular (shuffled unique data) ===== */}
+        {popular.length > 0 && (
+          <View style={[styles.section, { marginBottom: 40 }]}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <View style={styles.sectionAccent} />
+                <Text style={styles.sectionTitle}>⭐ Popular</Text>
+              </View>
+              <TouchableOpacity activeOpacity={0.7}>
+                <Text style={styles.seeAllText}>See All →</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={popular}
+              renderItem={({ item }) => (
+                <MovieCard item={item} onPlay={handlePlayMovie} size="small" />
+              )}
+              keyExtractor={(item) => `pop-${item.id}`}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.cardList}
+              nestedScrollEnabled={true}
+            />
           </View>
-          <View style={styles.continueWatching}>
-            <Text style={styles.emptyStateText}>
-              Start watching something to see it here
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* Modals */}
-      <ProfileModal />
-      <VideoPlayerModal
-        visible={videoVisible}
-        source={videoSource}
-        paused={isVideoPaused}
-        isLoading={isVideoLoading}
-        videoKey={videoKey}
-        onClose={closeVideo}
-        onTogglePause={toggleVideoPause}
-        onLoad={handleVideoLoad}
-        onError={handleVideoError}
-        onBuffer={handleVideoBuffer}
-      />
+        )}
+      </Animated.ScrollView>
     </SafeAreaView>
   )
 }
 
-// ---- Styles (unchanged, keep as provided) ----
+// ---- OTT Style Premium Styles ----
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F1E',
+    backgroundColor: '#0a0e27',
   },
-  header: {
+  // Floating Header
+  floatingHeader: {
+    left: 0,
+    right: 0,
+    zIndex: 100,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1A1A2E',
+    paddingHorizontal: isSmallPhone ? 16 : 20,
+    paddingTop: isSmallPhone ? 10 : 15,
+    paddingBottom: 10,
+    backgroundColor: 'rgba(10,14,39,0.6)',
   },
   headerLeft: {
-    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logoGradient: {
+    width: isSmallPhone ? 36 : 40,
+    height: isSmallPhone ? 36 : 40,
+    borderRadius: isSmallPhone ? 10 : 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   logo: {
-    fontSize: 24,
+    fontSize: isSmallPhone ? getFontSize(18) : getFontSize(22),
     fontWeight: 'bold',
     color: '#FFFFFF',
     letterSpacing: 1,
@@ -712,582 +756,455 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  iconButton: {
-    padding: 8,
-    marginLeft: 12,
+  headerIconButton: {
+    padding: isSmallPhone ? 6 : 8,
+    marginLeft: isSmallPhone ? 4 : 8,
   },
   profileButton: {
-    marginLeft: 12,
+    marginLeft: isSmallPhone ? 4 : 8,
   },
   profileImage: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
     borderWidth: 2,
-    borderColor: '#4A6BFF',
+    borderColor: '#6C63FF',
   },
   scrollView: {
     flex: 1,
   },
-  searchContainer: {
+  // Hero Section
+  heroContainer: {
+    width: '100%',
+    height: isTablet ? 500 : 420,
+    position: 'relative',
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  heroGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '70%',
+  },
+  heroContent: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: isSmallPhone ? 16 : 24,
+    paddingBottom: isSmallPhone ? 20 : 30,
+  },
+  heroBadge: {
+    backgroundColor: '#6C63FF',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  heroBadgeText: {
+    color: '#FFFFFF',
+    fontSize: isSmallPhone ? 10 : 12,
+    fontWeight: '600',
+  },
+  heroTitle: {
+    fontSize: isSmallPhone ? getFontSize(24) : getFontSize(32),
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  heroDescription: {
+    fontSize: isSmallPhone ? getFontSize(13) : getFontSize(16),
+    color: '#D1D5DB',
+    marginBottom: 12,
+    lineHeight: 22,
+  },
+  heroMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1A1A2E',
-    margin: 20,
-    paddingHorizontal: 15,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2D2D44',
+    gap: 12,
+    marginBottom: 16,
+    flexWrap: 'wrap',
   },
-  searchIcon: {
-    marginRight: 10,
+  heroRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
-  searchInput: {
-    flex: 1,
+  heroRatingText: {
+    color: '#FFD700',
+    fontSize: isSmallPhone ? 12 : 14,
+    fontWeight: '600',
+  },
+  heroMetaText: {
+    color: '#9CA3AF',
+    fontSize: isSmallPhone ? 11 : 13,
+  },
+  heroHD: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  heroHDText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: isSmallPhone ? 9 : 11,
+    fontWeight: '700',
+  },
+  heroButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  heroPlayButton: {
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  heroPlayGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: isSmallPhone ? 20 : 28,
+    paddingVertical: isSmallPhone ? 10 : 14,
+    gap: 8,
+  },
+  heroPlayText: {
+    color: '#FFFFFF',
+    fontSize: isSmallPhone ? 14 : 16,
+    fontWeight: '600',
+  },
+  heroInfoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: isSmallPhone ? 16 : 20,
+    paddingVertical: isSmallPhone ? 10 : 14,
+    borderRadius: 8,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  heroInfoText: {
+    color: '#FFFFFF',
+    fontSize: isSmallPhone ? 14 : 16,
+    fontWeight: '500',
+  },
+  // Hero Fallback
+  heroFallback: {
+    width: '100%',
+    height: isTablet ? 400 : 340,
+  },
+  heroFallbackGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  heroFallbackTitle: {
+    color: '#FFFFFF',
+    fontSize: isSmallPhone ? getFontSize(24) : getFontSize(32),
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  heroFallbackText: {
+    color: '#9CA3AF',
+    fontSize: isSmallPhone ? getFontSize(14) : getFontSize(16),
+    marginTop: 8,
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  heroFallbackButton: {
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  heroFallbackGradientButton: {
+    paddingHorizontal: 32,
     paddingVertical: 12,
   },
-  categoriesContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
+  heroFallbackButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Categories
+  // Live TV banner
+  liveBanner: {
+    marginHorizontal: isSmallPhone ? 12 : 20,
+    marginTop: isSmallPhone ? 12 : 16,
+    marginBottom: isSmallPhone ? 4 : 6,
+    borderRadius: 16,
+    overflow: 'hidden',
+    elevation: 10,
+    shadowColor: '#E03131',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 14,
+  },
+  liveBannerGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: isSmallPhone ? 16 : 20,
+    paddingVertical: isSmallPhone ? 14 : 17,
+  },
+  liveBannerSheen: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  liveBannerLeft: { flex: 1 },
+  liveBannerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(0,0,0,0.28)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 7,
+    marginBottom: 7,
+  },
+  liveBannerDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
+  liveBannerBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  liveBannerTitle: {
+    color: '#FFFFFF',
+    fontSize: isSmallPhone ? getFontSize(17) : getFontSize(19),
+    fontWeight: 'bold',
+  },
+  liveBannerSubtitle: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: isSmallPhone ? 11.5 : 12.5,
+    marginTop: 3,
+  },
+  liveBannerIcon: {
+    width: isSmallPhone ? 46 : 52,
+    height: isSmallPhone ? 46 : 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 14,
+  },
+
+  categoriesWrapper: {
+    paddingHorizontal: isSmallPhone ? 12 : 20,
+    paddingVertical: isSmallPhone ? 12 : 16,
   },
   categoryChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: '#1A1A2E',
+    paddingHorizontal: isSmallPhone ? 16 : 20,
+    paddingVertical: isSmallPhone ? 6 : 10,
     borderRadius: 20,
-    marginRight: 10,
+    marginRight: isSmallPhone ? 8 : 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: '#2D2D44',
+    borderColor: 'rgba(255,255,255,0.08)',
+    position: 'relative',
   },
   categoryChipActive: {
-    backgroundColor: '#4A6BFF',
-    borderColor: '#4A6BFF',
+    backgroundColor: 'rgba(108, 99, 255, 0.15)',
+    borderColor: '#6C63FF',
   },
   categoryText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+    color: '#9CA3AF',
+    fontSize: isSmallPhone ? getFontSize(13) : getFontSize(15),
     fontWeight: '500',
   },
   categoryTextActive: {
     color: '#FFFFFF',
     fontWeight: '600',
   },
+  categoryActiveIndicator: {
+    position: 'absolute',
+    bottom: -1,
+    left: '30%',
+    right: '30%',
+    height: 2,
+    backgroundColor: '#6C63FF',
+    borderRadius: 2,
+  },
+  // Sections
   section: {
-    marginBottom: 30,
+    marginBottom: isSmallPhone ? 20 : 30,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 15,
+    paddingHorizontal: isSmallPhone ? 12 : 20,
+    marginBottom: isSmallPhone ? 10 : 15,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionAccent: {
+    width: 4,
+    height: isSmallPhone ? 18 : 22,
+    backgroundColor: '#6C63FF',
+    borderRadius: 2,
   },
   sectionTitle: {
-    fontSize: 22,
+    fontSize: isSmallPhone ? getFontSize(18) : getFontSize(22),
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
   seeAllText: {
-    color: '#4A6BFF',
-    fontSize: 14,
+    color: '#6C63FF',
+    fontSize: isSmallPhone ? getFontSize(13) : getFontSize(15),
     fontWeight: '600',
   },
-  featuredItem: {
-    width: width - 40,
-    marginHorizontal: 20,
-    borderRadius: 16,
+  cardList: {
+    paddingHorizontal: isSmallPhone ? 12 : 20,
+    gap: isSmallPhone ? 8 : 12,
+  },
+  // Movie Card
+  movieCard: {
+    marginRight: isSmallPhone ? 8 : 12,
+    borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#1A1A2E',
-  },
-  featuredImage: {
-    width: '100%',
-    height: 200,
-  },
-  featuredContent: {
-    padding: 15,
-  },
-  featuredTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  featuredInfo: {
-    marginBottom: 15,
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 5,
-  },
-  ratingText: {
-    color: '#FFD700',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 5,
-  },
-  featuredMeta: {
-    color: '#888',
-    fontSize: 12,
-  },
-  playButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4A6BFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-  },
-  playButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  trendingList: {
-    paddingHorizontal: 20,
-  },
-  trendingItem: {
-    width: 140,
-    marginRight: 15,
-  },
-  trendingImage: {
-    width: 140,
-    height: 200,
-    borderRadius: 12,
-  },
-  trendingOverlay: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-  },
-  playIconOverlay: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -20 }, { translateY: -20 }],
-  },
-  ratingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  ratingBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 4,
-  },
-  trendingTitle: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  popularList: {
-    paddingHorizontal: 20,
-  },
-  noDataContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 20,
-  },
-  noDataText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginTop: 16,
-  },
-  noDataSubtext: {
-    fontSize: 14,
-    color: '#888',
-    marginTop: 8,
-  },
-  popularItem: {
-    marginRight: 12,
-  },
-  popularImage: {
-    width: 110,
-    height: 160,
-    borderRadius: 8,
-  },
-  popularOverlay: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-  },
-  playIconOverlaySmall: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -15 }, { translateY: -15 }],
-  },
-  continueWatching: {
-    paddingHorizontal: 20,
-    paddingVertical: 40,
-    alignItems: 'center',
-  },
-  emptyStateText: {
-    color: '#666',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'flex-end',
-  },
-  profileContainer: {
-    backgroundColor: '#0F0F1E',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 40,
-    maxHeight: '90%',
-  },
-  profileHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1A1A2E',
-  },
-  profileTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  closeButton: {
-    padding: 4,
-  },
-  profileInfo: {
-    alignItems: 'center',
-    padding: 30,
-  },
-  profileLargeImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 3,
-    borderColor: '#4A6BFF',
-    marginBottom: 15,
-  },
-  userName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 5,
-  },
-  userEmail: {
-    fontSize: 16,
-    color: '#888',
-    marginBottom: 15,
-  },
-  membershipBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(74, 107, 255, 0.2)',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: '#4A6BFF',
+    borderColor: 'rgba(255,255,255,0.05)',
   },
-  membershipText: {
-    color: '#4A6BFF',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: 20,
-    marginBottom: 30,
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statNumber: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 5,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#888',
-  },
-  menuContainer: {
-    paddingHorizontal: 20,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1A1A2E',
-  },
-  menuText: {
-    flex: 1,
-    color: '#FFFFFF',
-    fontSize: 16,
-    marginLeft: 15,
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 30,
-    marginHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#FF6B6B',
-  },
-  logoutText: {
-    color: '#FF6B6B',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  videoContainer: {
-    flex: 1,
-    backgroundColor: '#000000',
-  },
-  videoCloseButton: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    zIndex: 1000,
-    padding: 10,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 20,
-  },
-  videoPlayerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000000',
-  },
-  videoPlayer: {
+  movieImage: {
     width: '100%',
-    height: '100%',
-    backgroundColor: '#000000',
+    resizeMode: 'cover',
   },
-  videoLoadingContainer: {
+  movieBottomGradient: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -50 }, { translateY: -50 }],
-    alignItems: 'center',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '55%',
   },
-  videoLoadingText: {
-    color: '#FFFFFF',
-    marginTop: 10,
-    fontSize: 16,
-  },
-  playButtonOverlay: {
+  movieOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
   },
-  playButtonCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(74, 107, 255, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  videoControls: {
+  movieGradient: {
     position: 'absolute',
-    bottom: 50,
+    top: 0,
     left: 0,
     right: 0,
+    bottom: 0,
+  },
+  movieBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
     flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  movieRating: {
+    color: '#FFD700',
+    fontSize: isSmallPhone ? 10 : 12,
+    fontWeight: '600',
+  },
+  moviePlayButton: {
+    position: 'absolute',
+    top: '45%',
+    left: '50%',
+    transform: [{ translateX: -22 }, { translateY: -22 }],
+  },
+  playButtonMini: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  movieTitleContainer: {
+    paddingVertical: isSmallPhone ? 6 : 8,
+    paddingHorizontal: 8,
+  },
+  movieSmallTitle: {
+    color: '#FFFFFF',
+    fontSize: isSmallPhone ? 11 : 13,
+    fontWeight: '600',
+  },
+  movieSubtitle: {
+    color: '#9CA3AF',
+    fontSize: isSmallPhone ? 10 : 11,
+    marginTop: 2,
+  },
+  // No Data
+  noDataContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: isSmallPhone ? 30 : 40,
     paddingHorizontal: 20,
   },
-  controlButton: {
-    padding: 15,
-    marginHorizontal: 10,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 25,
+  noDataText: {
+    fontSize: isSmallPhone ? getFontSize(16) : getFontSize(18),
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginTop: 12,
   },
+  noDataSubtext: {
+    fontSize: isSmallPhone ? getFontSize(12) : getFontSize(14),
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  // Loading / Error
   mainLoadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F1E',
+    backgroundColor: '#0a0e27',
   },
   mainLoadingText: {
-    color: '#FFFFFF',
-    marginTop: 15,
-    fontSize: 16,
+    color: '#9CA3AF',
+    marginTop: 12,
+    fontSize: isSmallPhone ? getFontSize(14) : getFontSize(16),
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0F0F1E',
+    backgroundColor: '#0a0e27',
     paddingHorizontal: 40,
   },
   errorText: {
     color: '#FF6B6B',
-    fontSize: 18,
+    fontSize: isSmallPhone ? getFontSize(16) : getFontSize(18),
     textAlign: 'center',
-    marginTop: 15,
-    marginBottom: 25,
+    marginTop: 16,
+    marginBottom: 20,
   },
   retryButton: {
-    backgroundColor: '#4A6BFF',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  retryGradient: {
     paddingHorizontal: 30,
     paddingVertical: 12,
-    borderRadius: 8,
   },
   retryButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: isSmallPhone ? getFontSize(14) : getFontSize(16),
     fontWeight: '600',
   },
-  homeVideoSection: {
-    marginBottom: 30,
-    paddingHorizontal: 20,
-  },
-  homeVideoTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 15,
-  },
-  homeVideoContainer: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#1A1A2E',
-    marginBottom: 15,
-  },
-  homeVideoThumbnail: {
-    width: '100%',
-    height: '100%',
-  },
-  homeVideoPlayOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-  },
-  homeVideoInfo: {
-    paddingHorizontal: 5,
-  },
-  homeVideoMovieTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  homeVideoDescription: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 10,
-    lineHeight: 20,
-  },
-  homeVideoMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  homeVideoDuration: {
-    color: '#888',
-    fontSize: 14,
-    marginLeft: 15,
-  },
-  homeVideoYear: {
-    color: '#888',
-    fontSize: 14,
-    marginLeft: 15,
-  },
-  homeVideoFallbackContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1A1A2E',
-  },
-  homeVideoFallbackTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 15,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  homeVideoFallbackText: {
-    color: '#888',
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 40,
-  },
-  browseButton: {
-    backgroundColor: '#4A6BFF',
-    paddingHorizontal: 30,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  browseButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  // Debug styles (optional – remove if not needed)
-  debugContainer: {
-    backgroundColor: '#1A1A2E',
-    margin: 20,
-    padding: 15,
-    borderRadius: 12,
-  },
-  debugText: {
-    color: '#4A6BFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 15,
-  },
-  debugMovieItem: {
-    backgroundColor: '#0F0F1E',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  debugMovieTitle: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  debugMovieDetail: {
-    color: '#888',
-    fontSize: 12,
-    marginBottom: 2,
-  },
+  logos:{
+    width: isSmallPhone ? 24 : 28,
+    height: isSmallPhone ? 24 : 28,
+  }
 })

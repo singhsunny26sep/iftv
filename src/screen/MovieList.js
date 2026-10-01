@@ -6,11 +6,11 @@ import {
   FlatList,
   TouchableOpacity,
   Image,
-  SafeAreaView,
   StatusBar,
   TextInput,
   Dimensions
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 const { width } = Dimensions.get('window');
