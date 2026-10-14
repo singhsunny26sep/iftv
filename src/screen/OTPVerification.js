@@ -26,7 +26,11 @@ import authService from '../api/auth';
 const { width, height } = Dimensions.get('window');
 
 const OTPVerification = ({ navigation, route }) => {
-  const { mobileNumber, sessionId } = route.params;
+  const { mobileNumber } = route.params;
+  // app-api.md §1: a resend returns a brand-new sessionId and invalidates the
+  // previous one. Keep it in local state so the verify handler always sends the
+  // latest value, instead of the (stale) route param.
+  const [sessionId, setSessionId] = useState(route.params.sessionId);
   const { login } = useAuth();
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
@@ -73,17 +77,17 @@ const OTPVerification = ({ navigation, route }) => {
     ]).start();
 
     // Logo rotation animation
-    Animated.loop(
+    const rotateLoop = Animated.loop(
       Animated.timing(logoRotate, {
         toValue: 1,
         duration: 20000,
         useNativeDriver: true,
         easing: Easing.linear,
       })
-    ).start();
+    );
 
     // Pulse animation for logo
-    Animated.loop(
+    const pulseLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
           toValue: 1.05,
@@ -98,22 +102,35 @@ const OTPVerification = ({ navigation, route }) => {
           easing: Easing.inOut(Easing.ease),
         }),
       ])
-    ).start();
+    );
 
     // Shimmer animation
-    Animated.loop(
+    const shimmerLoop = Animated.loop(
       Animated.timing(shimmerAnim, {
         toValue: 1,
         duration: 3000,
         useNativeDriver: true,
         easing: Easing.linear,
       })
-    ).start();
+    );
+
+    rotateLoop.start();
+    pulseLoop.start();
+    shimmerLoop.start();
 
     // Focus first input
-    setTimeout(() => {
+    const focusTimer = setTimeout(() => {
       inputRefs.current[0]?.focus();
     }, 500);
+
+    // Native-driven loops never stop on their own; leaving them running after
+    // unmount keeps the UI thread busy for the rest of the session.
+    return () => {
+      rotateLoop.stop();
+      pulseLoop.stop();
+      shimmerLoop.stop();
+      clearTimeout(focusTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -123,7 +140,7 @@ const OTPVerification = ({ navigation, route }) => {
       Animated.timing(progressAnim, {
         toValue: (30 - resendTimer) / 30,
         duration: 1000,
-        useNativeDriver: false,
+        useNativeDriver: true,
       }).start();
 
       interval = setInterval(() => {
@@ -134,7 +151,7 @@ const OTPVerification = ({ navigation, route }) => {
       Animated.timing(progressAnim, {
         toValue: 1,
         duration: 300,
-        useNativeDriver: false,
+        useNativeDriver: true,
       }).start();
     }
     return () => clearInterval(interval);
@@ -246,7 +263,9 @@ const OTPVerification = ({ navigation, route }) => {
 
     setVerifying(true);
     try {
-      const result = await login(mobileNumber, otpCode, sessionId);
+      const result = await login(mobileNumber, otpCode, sessionId, {
+        currentScreen: 'HOME_SCREEN',
+      });
       if (result.success) {
         Alert.alert(
           '🎉 Welcome!',
@@ -254,12 +273,9 @@ const OTPVerification = ({ navigation, route }) => {
           [
             {
               text: 'Continue',
-              onPress: () => {
-                navigation.reset({
-                  index: 0,
-                  routes: [{ name: 'Main' }],
-                });
-              },
+              // No navigation call needed: the auth guard in Navigation.js
+              // swaps to the app stack as soon as isAuthenticated flips.
+              onPress: () => {},
             },
           ]
         );
@@ -290,6 +306,9 @@ const OTPVerification = ({ navigation, route }) => {
     setResendTimer(30);
     try {
       const response = await authService.sendOTP(mobileNumber);
+      if (response.sessionId) {
+        setSessionId(response.sessionId);
+      }
       Alert.alert('📨 OTP Sent!', response.message || 'New OTP has been sent to your number');
       setOtp(['', '', '', '', '', '']);
       setPrevOtp('');
@@ -317,9 +336,12 @@ const OTPVerification = ({ navigation, route }) => {
     outputRange: [0, 0, 1, 0, 0],
   });
 
-  const progressWidth = progressAnim.interpolate({
+  // Scales the fill instead of animating `width`. `width` is a layout
+  // property, so it cannot run on the native driver — it drove a 60fps
+  // setNativeProps loop on the JS thread for the whole 30s resend countdown.
+  const progressScale = progressAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
+    outputRange: [0, 1],
   });
 
   return (
@@ -525,7 +547,7 @@ const OTPVerification = ({ navigation, route }) => {
                 {/* Progress Bar */}
                 <View style={styles.progressContainer}>
                   <View style={styles.progressBackground}>
-                    <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
+                    <Animated.View style={[styles.progressFill, { transform: [{ scaleX: progressScale }] }]} />
                   </View>
                   <Text style={styles.progressText}>
                     {canResend ? 'Ready to resend' : `${resendTimer}s remaining`}
@@ -852,9 +874,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   progressFill: {
+    width: '100%',
     height: '100%',
     backgroundColor: '#6C63FF',
     borderRadius: 2,
+    transformOrigin: 'left center',
   },
   progressText: {
     fontSize: Typography.fontSize.xs,

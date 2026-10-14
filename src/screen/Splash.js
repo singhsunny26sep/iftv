@@ -20,7 +20,7 @@ export default function Splash() {
 
   useEffect(() => {
     // Start animations when component mounts
-    Animated.parallel([
+    const entrance = Animated.parallel([
       // Fade in animation
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -41,18 +41,30 @@ export default function Splash() {
         duration: 1000,
         useNativeDriver: true,
         easing: Easing.out(Easing.cubic)
-      }),
-      // Rotate animation for loader
-      Animated.loop(
-        Animated.timing(rotateAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-          easing: Easing.linear
-        })
-      )
-    ]).start()
-  }, [])
+      })
+    ]);
+    entrance.start();
+
+    // Rotate animation for loader
+    const spinnerLoop = Animated.loop(
+      Animated.timing(rotateAnim, {
+        toValue: 1,
+        duration: 2000,
+        useNativeDriver: true,
+        easing: Easing.linear
+      })
+    );
+    spinnerLoop.start();
+
+    // Animated.loop hands off to the native driver and only ever stops when
+    // .stop() is called. Without this cleanup, every mount of Splash (the auth
+    // gate remounts it on each login/logout) leaks another permanent native
+    // animation.
+    return () => {
+      entrance.stop();
+      spinnerLoop.stop();
+    };
+  }, [fadeAnim, scaleAnim, slideAnim, rotateAnim]);
 
   const rotateInterpolate = rotateAnim.interpolate({
     inputRange: [0, 1],

@@ -1,0 +1,12 @@
+# Copy this file to android/key.properties and fill in the real values.
+# key.properties and the .keystore file are git-ignored on purpose - never
+# commit signing credentials to version control.
+#
+# Generate an upload key first:
+#   keytool -genkey -v -keystore android/app/iftv-upload.keystore \
+#     -alias iftv-upload -keyalg RSA -keysize 2048 -validity 10000
+
+storeFile=iftv-upload.keystore
+storePassword=CHANGE_ME
+keyAlias=iftv-upload
+keyPassword=CHANGE_ME

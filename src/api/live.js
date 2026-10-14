@@ -1,7 +1,6 @@
 // Live streaming API service
-import authService from './auth';
-
-const BASE_URL = 'https://iftv.nvsricemart.com/iftv-ott';
+import { apiRequest } from './client';
+import { BASE_URL } from './config';
 
 // Resolve relative stream paths against the API host, and normalise HLS
 // playlist URLs the same way the VOD player does.
@@ -22,6 +21,7 @@ function resolveStreamUrl(streamUrl) {
 
 const getAuthToken = () => {
   try {
+    const { default: authService } = require('./auth');
     return authService.getCurrentUser()?.authToken || null;
   } catch (error) {
     console.error('Error getting auth token:', error);

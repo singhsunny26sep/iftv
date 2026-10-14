@@ -6,19 +6,26 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Image,
   StatusBar,
+  Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
-import subscriptionService from '../api/subscriptions';
-import { scale } from '../utils/Scalling';
+import {
+  getPlans,
+  getQuote,
+  createOrder,
+  verifyPayment,
+  reportFailedPayment,
+} from '../api/subscriptions';
 
 const SubscriptionScreen = ({ navigation }) => {
   const [subscriptions, setSubscriptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [purchasing, setPurchasing] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
 
   useEffect(() => {
@@ -29,10 +36,10 @@ const SubscriptionScreen = ({ navigation }) => {
       setLoading(true);
       setError(null);
 
-      const response = await subscriptionService.getAllSubscriptions();
+      const response = await getPlans();
 
       if (response.success) {
-        setSubscriptions(response.data.data || []);
+        setSubscriptions(response.plans || []);
       } else {
         setError(response.message || 'Failed to load subscriptions');
       }
@@ -44,26 +51,147 @@ const SubscriptionScreen = ({ navigation }) => {
     }
   };
 
-  const handleSelectPlan = (plan) => {
-    setSelectedPlan(plan._id);
+  const handleBuy = async (plan) => {
+    if (!plan.canPurchase || plan.price === 0) {
+      return;
+    }
+    if (Platform.OS === 'ios') {
+      Alert.alert(
+        'iOS purchase not supported',
+        'Please buy your plan on the IFTV-OTT website.',
+      );
+      return;
+    }
+
+    setPurchasing(true);
+    let orderId = null;
+    try {
+      const quoteRes = await getQuote(plan.id);
+      if (!quoteRes.success) {
+        Alert.alert('Cannot purchase', quoteRes.message || 'Plan not available right now.');
+        return;
+      }
+
+      const orderRes = await createOrder(plan.id, 'android');
+      if (!orderRes.success) {
+        if (orderRes.iosBlocked) {
+          Alert.alert('Not available on iOS', orderRes.message);
+          return;
+        }
+        Alert.alert('Could not create order', orderRes.message || 'Please try again.');
+        return;
+      }
+
+      orderId = orderRes.payment?._id || orderRes.checkout?.order_id;
+      const checkout = orderRes.checkout;
+
+      if (!checkout) {
+        Alert.alert('Error', 'No checkout data received.');
+        return;
+      }
+
+      // Use the Razorpay SDK via a lazy dynamic import so the module is only
+      // pulled in on Android where it exists.
+      const Razorpay = (await import('react-native-razorpay')).default;
+      const options = {
+        name: checkout.name,
+        description: checkout.description,
+        order_id: checkout.order_id,
+        amount: checkout.amount,
+        currency: checkout.currency,
+        prefill: checkout.prefill,
+        notes: checkout.notes,
+      };
+
+      const payment = await Razorpay.open(options);
+      if (!payment || !payment.razorpay_payment_id) {
+        await reportFailedPayment({
+          razorpay_order_id: checkout.order_id,
+          reason: 'User closed checkout',
+        }).catch(() => {});
+        return;
+      }
+
+      const verifyRes = await verifyPayment({
+        razorpay_order_id: payment.razorpay_order_id,
+        razorpay_payment_id: payment.razorpay_payment_id,
+        razorpay_signature: payment.razorpay_signature,
+      });
+
+      if (verifyRes.success) {
+        Alert.alert('Payment successful', 'Your plan is now active!', [
+          { text: 'OK', onPress: () => navigation.replace('Main', { screen: 'Profile' }) },
+        ]);
+      } else {
+        Alert.alert('Verification failed', 'Payment may have been processed. Check My Plan.');
+      }
+    } catch (e) {
+      if (e.code === 'RazorpayPaymentCancelledError' || e.code === 'PAYMENT_CANCELLED') {
+        await reportFailedPayment({
+          razorpay_order_id: orderId || '',
+          reason: 'User cancelled payment',
+        }).catch(() => {});
+      } else {
+        Alert.alert('Payment error', e.message || 'Something went wrong.');
+      }
+    } finally {
+      setPurchasing(false);
+    }
   };
   const renderSubscriptionCard = (plan, index) => {
-    const isSelected = selectedPlan === plan._id;
+    const isSelected = selectedPlan?.id === plan.id;
     const isPremium = plan.price >= 199;
     return (
-      <View key={plan._id} style={[styles.card, isSelected && styles.selectedCard]}>
-        {/* Header Section */}
+      <View key={plan.id} style={[styles.card, isSelected && styles.selectedCard]}>
         <LinearGradient
           colors={isPremium ? ['#FFD700', '#FFA500'] : ['#4A6BFF', '#6B8AFF']}
           style={styles.cardHeader}
         >
           <Text style={styles.planName}>{plan.name}</Text>
           <Text style={styles.planType}>{plan.type.toUpperCase()}</Text>
+          {plan.isPopular && (
+            <View style={styles.popularBadge}>
+              <Icon name="star" size={10} color="#FFD700" />
+              <Text style={styles.popularText}>Most popular</Text>
+            </View>
+          )}
         </LinearGradient>
 
         {/* Content Section */}
         <View style={styles.cardContent}>
-          <Text style={styles.planDescription}>{plan.description}</Text>
+          {(plan.benefits.length > 0 || plan.limitations.length > 0) && (
+            <>
+              {plan.benefits.length > 0 && (
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Icon name="checkmark-circle" size={18} color="#4CAF50" />
+                    <Text style={styles.sectionTitle}>Benefits</Text>
+                  </View>
+                  {plan.benefits.map((benefit, idx) => (
+                    <View key={`b-${idx}`} style={styles.benefitItem}>
+                      <Icon name="add" size={14} color="#4CAF50" />
+                      <Text style={styles.benefitText}>{benefit}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {plan.limitations && plan.limitations.length > 0 && (
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Icon name="remove-circle" size={18} color="#FF6B6B" />
+                    <Text style={styles.sectionTitle}>Limitations</Text>
+                  </View>
+                  {plan.limitations.map((limitation, idx) => (
+                    <View key={`l-${idx}`} style={styles.limitationItem}>
+                      <Icon name="remove" size={14} color="#FF6B6B" />
+                      <Text style={styles.limitationText}>{limitation}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
 
           {/* Price Section */}
           <View style={styles.priceContainer}>
@@ -72,45 +200,22 @@ const SubscriptionScreen = ({ navigation }) => {
             <Text style={styles.duration}>/{plan.durationInDays} days</Text>
           </View>
 
-          {/* Benefits Section */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Icon name="checkmark-circle" size={18} color="#4CAF50" />
-              <Text style={styles.sectionTitle}>Benefits</Text>
-            </View>
-            {plan.benefits.map((benefit, idx) => (
-              <View key={idx} style={styles.benefitItem}>
-                <Icon name="add" size={14} color="#4CAF50" />
-                <Text style={styles.benefitText}>{benefit}</Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Limitations Section */}
-          {plan.limitations && plan.limitations.length > 0 && (
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Icon name="remove-circle" size={18} color="#FF6B6B" />
-                <Text style={styles.sectionTitle}>Limitations</Text>
-              </View>
-              {plan.limitations.map((limitation, idx) => (
-                <View key={idx} style={styles.limitationItem}>
-                  <Icon name="remove" size={14} color="#FF6B6B" />
-                  <Text style={styles.limitationText}>{limitation}</Text>
-                </View>
-              ))}
-            </View>
+          {plan.price === 0 ? (
+            <Text style={styles.freeLabel}>Free</Text>
+          ) : (
+            <TouchableOpacity
+              style={[styles.buyButton, isSelected && styles.buyButtonSelected]}
+              onPress={() => handleBuy(plan)}
+              disabled={purchasing}
+              activeOpacity={0.85}
+            >
+              {purchasing ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.buyButtonText}>Buy Now</Text>
+              )}
+            </TouchableOpacity>
           )}
-
-          {/* Select Button */}
-          <TouchableOpacity
-            style={[styles.selectButton, isSelected && styles.selectedButton]}
-            onPress={() => handleSelectPlan(plan)}
-          >
-            <Text style={[styles.selectButtonText, isSelected && styles.selectedButtonText]}>
-              {isSelected ? 'Selected' : 'Select Plan'}
-            </Text>
-          </TouchableOpacity>
         </View>
       </View>
     );
@@ -175,6 +280,14 @@ const SubscriptionScreen = ({ navigation }) => {
           <Icon name="shield-checkmark" size={16} color="#888" />
           <Text style={styles.footerText}>Secure payment • Cancel anytime</Text>
         </View>
+
+        <TouchableOpacity
+          style={styles.managePlansBtn}
+          onPress={() => navigation.navigate('MyPlan')}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.managePlansText}>View My Plans &amp; History</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -378,6 +491,45 @@ const styles = StyleSheet.create({
   selectedButtonText: {
     color: '#4A6BFF',
   },
+  popularBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    gap: 4,
+    marginTop: 4,
+  },
+  popularText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  buyButton: {
+    backgroundColor: '#4A6BFF',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  buyButtonSelected: {
+    backgroundColor: 'rgba(74, 107, 255, 0.2)',
+    borderWidth: 2,
+    borderColor: '#4A6BFF',
+  },
+  buyButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  freeLabel: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 12,
+  },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -388,6 +540,16 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 12,
     marginLeft: 8,
+  },
+  managePlansBtn: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginTop: 8,
+  },
+  managePlansText: {
+    color: '#A79BFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

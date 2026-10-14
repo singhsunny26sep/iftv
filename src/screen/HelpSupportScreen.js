@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
-  Linking,
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -56,42 +55,8 @@ const FAQS = [
   },
 ];
 
-const CONTACT_OPTIONS = [
-  {
-    id: 'email',
-    icon: 'mail-outline',
-    title: 'Email Support',
-    subtitle: 'support@iftv.com',
-    color: '#6C63FF',
-    url: 'mailto:support@iftv.com',
-  },
-  {
-    id: 'phone',
-    icon: 'call-outline',
-    title: 'Call Support',
-    subtitle: '+91 1800 123 4567',
-    color: '#4CAF50',
-    url: 'tel:+9118001234567',
-  },
-  {
-    id: 'chat',
-    icon: 'chatbubble-ellipses-outline',
-    title: 'Live Chat',
-    subtitle: 'Available 10 AM - 10 PM',
-    color: '#FF6B6B',
-    url: null,
-  },
-];
-
 const HelpSupportScreen = ({ navigation }) => {
   const [openFaq, setOpenFaq] = useState(null);
-
-  const handleContactPress = (option) => {
-    if (!option.url) {
-      return;
-    }
-    Linking.openURL(option.url).catch(() => {});
-  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -130,35 +95,25 @@ const HelpSupportScreen = ({ navigation }) => {
             </View>
             <Text style={styles.heroTitle}>How can we help?</Text>
             <Text style={styles.heroSubtitle}>
-              Find quick answers or reach out to our team anytime.
+              Find quick answers below, or open a support ticket for personalised help.
             </Text>
           </View>
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Contact Us</Text>
-          </View>
-
-          <View style={styles.contactList}>
-            {CONTACT_OPTIONS.map((option) => (
-              <TouchableOpacity
-                key={option.id}
-                style={styles.contactCard}
-                onPress={() => handleContactPress(option)}
-                activeOpacity={0.7}
-              >
-                <View
-                  style={[styles.contactIcon, { backgroundColor: `${option.color}20` }]}
-                >
-                  <Icon name={option.icon} size={20} color={option.color} />
-                </View>
-                <View style={styles.contactInfo}>
-                  <Text style={styles.contactTitle}>{option.title}</Text>
-                  <Text style={styles.contactSubtitle}>{option.subtitle}</Text>
-                </View>
-                <Icon name="chevron-forward" size={18} color="#6B7280" />
-              </TouchableOpacity>
-            ))}
-          </View>
+          <TouchableOpacity
+            style={styles.createTicketCard}
+            onPress={() => navigation.navigate('CreateTicket')}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#6C63FF', '#4A3FF5']}
+              style={styles.createTicketGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Icon name="chatbubble-ellipses-outline" size={22} color="#FFFFFF" />
+              <Text style={styles.createTicketText}>Create a Support Ticket</Text>
+            </LinearGradient>
+          </TouchableOpacity>
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
@@ -265,6 +220,24 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 20,
   },
+  createTicketCard: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginBottom: 24,
+    elevation: 4,
+  },
+  createTicketGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+  },
+  createTicketText: {
+    color: '#FFFFFF',
+    fontSize: getFontSize(15),
+    fontWeight: '600',
+  },
   sectionHeader: {
     marginBottom: 12,
     marginTop: 10,
@@ -273,40 +246,6 @@ const styles = StyleSheet.create({
     fontSize: getFontSize(16),
     fontWeight: 'bold',
     color: '#FFFFFF',
-  },
-  contactList: {
-    marginBottom: 20,
-  },
-  contactCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
-  contactIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  contactInfo: {
-    flex: 1,
-  },
-  contactTitle: {
-    fontSize: getFontSize(15),
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 2,
-  },
-  contactSubtitle: {
-    fontSize: getFontSize(12),
-    color: '#9CA3AF',
   },
   faqList: {
     marginBottom: 20,

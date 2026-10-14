@@ -93,17 +93,17 @@ const LoginScreen = ({ navigation }) => {
     ]).start();
 
     // Logo rotation animation
-    Animated.loop(
+    const rotateLoop = Animated.loop(
       Animated.timing(logoRotate, {
         toValue: 1,
         duration: 20000,
         useNativeDriver: true,
         easing: Easing.linear,
       })
-    ).start();
+    );
 
     // Pulse animation for logo
-    Animated.loop(
+    const pulseLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
           toValue: 1.05,
@@ -118,17 +118,29 @@ const LoginScreen = ({ navigation }) => {
           easing: Easing.inOut(Easing.ease),
         }),
       ])
-    ).start();
+    );
 
     // Shimmer animation
-    Animated.loop(
+    const shimmerLoop = Animated.loop(
       Animated.timing(shimmerAnim, {
         toValue: 1,
         duration: 3000,
         useNativeDriver: true,
         easing: Easing.linear,
       })
-    ).start();
+    );
+
+    rotateLoop.start();
+    pulseLoop.start();
+    shimmerLoop.start();
+
+    // Native-driven loops run forever unless explicitly stopped, so leaking
+    // them keeps the UI thread animating after this screen is gone.
+    return () => {
+      rotateLoop.stop();
+      pulseLoop.stop();
+      shimmerLoop.stop();
+    };
   }, []);
 
   const handleFocus = () => {
@@ -333,13 +345,17 @@ const LoginScreen = ({ navigation }) => {
                 }
               ]}
             >
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => navigation.goBack()}
-                activeOpacity={0.7}
-              >
-                <Icon name="arrow-back" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
+              {navigation.canGoBack() ? (
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => navigation.goBack()}
+                  activeOpacity={0.7}
+                >
+                  <Icon name="arrow-back" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.backButton} />
+              )}
               <View style={styles.headerRight}>
                 <TouchableOpacity style={styles.helpButton} activeOpacity={0.7}>
                   <Icon name="headset-outline" size={24} color="#FFFFFF" />

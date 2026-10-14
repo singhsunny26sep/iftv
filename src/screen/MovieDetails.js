@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,83 +7,60 @@ import {
   Image,
   TouchableOpacity,
   StatusBar,
-  Dimensions,
   Modal,
-  Share
+  Share,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Video from 'react-native-video';
-const { width } = Dimensions.get('window');
-export default function MovieDetail({ route, navigation }) {
-  const { movie } = route.params;
-  const [videoVisible, setVideoVisible] = useState(false);
-  const [isVideoPaused, setIsVideoPaused] = useState(false);
-  const [isFavorite, setIsFavorite] = useState(false);
-  const videoRef = useRef(null);
+import { lockCallToAction } from '../api/movies';
 
-  const handlePlayVideo = () => {
-    setVideoVisible(true);
-    setIsVideoPaused(false);
-  };
-
-  const closeVideo = () => {
-    setVideoVisible(false);
-    setIsVideoPaused(true);
-  };
-
-  const toggleVideoPause = () => {
-    setIsVideoPaused(!isVideoPaused);
-  };
-
-  const toggleFavorite = () => {
-    setIsFavorite(!isFavorite);
-  };
-
-  const handleShare = async () => {
-    try {
-      await Share.share({
-        message: `Check out "${movie.title}" on IFTV HUB!`,
-        url: movie.videoUrl,
-      });
-    } catch (error) {
-      console.error('Error sharing:', error);
-    }
-  };
-
-  // Video Player Modal
-  const VideoPlayerModal = () => (
+// Video Player Modal
+//
+// Defined at module scope on purpose. Declaring it inside MovieDetail's render
+// body gave React a brand-new component type on every render, so the <Modal> and
+// the native <Video> surface were torn down and rebuilt (a fresh ExoPlayer on
+// the Android main thread) on every state change — including every tap on the
+// player itself, which made the tap-to-pause control impossible to use.
+function VideoPlayerModal({
+  visible,
+  paused,
+  source,
+  onClose,
+  onTogglePause,
+  videoRef,
+}) {
+  return (
     <Modal
       animationType="slide"
-      visible={videoVisible}
+      visible={visible}
       statusBarTranslucent={true}
     >
       <View style={styles.videoContainer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.videoCloseButton}
-          onPress={closeVideo}
+          onPress={onClose}
         >
           <Icon name="close" size={28} color="#FFFFFF" />
         </TouchableOpacity>
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={styles.videoPlayerContainer}
-          onPress={toggleVideoPause}
+          onPress={onTogglePause}
           activeOpacity={1}
         >
           <Video
             ref={videoRef}
-            source={{ uri: movie.videoUrl, type: 'hls' }}
+            source={source}
             style={styles.videoPlayer}
-            paused={isVideoPaused}
+            paused={paused}
             resizeMode="contain"
             controls={false}
-            repeat={true}
-            onError={(err) => console.log('Video error:', err)}
-            onLoad={(err) => console.log('Video loaded:', err)}
+            repeat={false}
           />
-          
-          {isVideoPaused && (
+
+          {paused && (
             <View style={styles.playButtonOverlay}>
               <Icon name="play-circle" size={80} color="#FFFFFF" />
             </View>
@@ -92,20 +69,100 @@ export default function MovieDetail({ route, navigation }) {
 
         {/* Custom Video Controls */}
         <View style={styles.videoControls}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.controlButton}
-            onPress={toggleVideoPause}
+            onPress={onTogglePause}
           >
-            <Icon 
-              name={isVideoPaused ? "play" : "pause"} 
-              size={24} 
-              color="#FFFFFF" 
+            <Icon
+              name={paused ? "play" : "pause"}
+              size={24}
+              color="#FFFFFF"
             />
           </TouchableOpacity>
         </View>
       </View>
     </Modal>
   );
+}
+
+export default function MovieDetail({ route, navigation }) {
+  const { movie } = route.params;
+  const [videoVisible, setVideoVisible] = useState(false);
+  const [isVideoPaused, setIsVideoPaused] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const videoRef = useRef(null);
+
+  // Stable across renders. react-native-video memoizes its native source on
+  // object identity, so a new literal every render re-diffed the source prop
+  // (and reset the resume position on Android) on each render.
+  const videoSource = useMemo(
+    () => (movie.videoUrl ? { uri: movie.videoUrl } : null),
+    [movie.videoUrl]
+  );
+
+   const handlePlayVideo = useCallback(() => {
+    const cta = lockCallToAction(movie);
+
+    if (movie.isLocked && cta) {
+      switch (cta.action) {
+        case 'login':
+          Alert.alert('Login karke dekho', 'Sign in to unlock this title.');
+          break;
+        case 'subscribe':
+          if (cta.label === 'Premium') {
+            navigation.navigate('Subscription');
+          } else {
+            Alert.alert(
+              'Subscription required',
+              'Upgrade your plan to watch this title.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Upgrade',
+                  onPress: () => navigation.navigate('Subscription'),
+                },
+              ],
+            );
+          }
+          break;
+        default:
+          Alert.alert('Locked', 'This title requires a subscription.');
+      }
+      return;
+    }
+
+    if (!movie.videoUrl) {
+      Alert.alert('Error', 'No video URL available for this title.');
+      return;
+    }
+
+    setVideoVisible(true);
+    setIsVideoPaused(false);
+  }, [movie, navigation]);
+
+  const closeVideo = useCallback(() => {
+    setVideoVisible(false);
+    setIsVideoPaused(true);
+  }, []);
+
+  const toggleVideoPause = useCallback(() => {
+    setIsVideoPaused(prev => !prev);
+  }, []);
+
+  const toggleFavorite = useCallback(() => {
+    setIsFavorite(prev => !prev);
+  }, []);
+
+  const handleShare = useCallback(async () => {
+    try {
+      await Share.share({
+        message: `Check out "${movie.title}" on IFTV HUB!`,
+        url: movie.videoUrl,
+      });
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
+  }, [movie.title, movie.videoUrl]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -129,6 +186,12 @@ export default function MovieDetail({ route, navigation }) {
               <Icon name="star" size={16} color="#FFD700" />
               <Text style={styles.ratingText}>{movie.rating}</Text>
             </View>
+            {movie.isLocked && (
+              <View style={styles.premiumBadge}>
+                <Icon name="lock-closed" size={12} color="#0F0F1E" />
+                <Text style={styles.premiumText}>Premium</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -144,13 +207,25 @@ export default function MovieDetail({ route, navigation }) {
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
-            <TouchableOpacity 
-              style={styles.playButton}
-              onPress={handlePlayVideo}
-            >
-              <Icon name="play" size={24} color="#FFFFFF" />
-              <Text style={styles.playButtonText}>Play</Text>
-            </TouchableOpacity>
+            {movie.isLocked ? (
+              <TouchableOpacity
+                style={styles.playButton}
+                onPress={handlePlayVideo}
+              >
+                <Icon name="lock-closed" size={24} color="#FFFFFF" />
+                <Text style={styles.playButtonText}>
+                  {lockCallToAction(movie)?.label || 'Premium'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.playButton}
+                onPress={handlePlayVideo}
+              >
+                <Icon name="play" size={24} color="#FFFFFF" />
+                <Text style={styles.playButtonText}>Play</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity 
               style={styles.iconButton}
@@ -226,7 +301,14 @@ export default function MovieDetail({ route, navigation }) {
       </ScrollView>
 
       {/* Video Player Modal */}
-      <VideoPlayerModal />
+      <VideoPlayerModal
+        visible={videoVisible}
+        paused={isVideoPaused}
+        source={videoSource}
+        videoRef={videoRef}
+        onClose={closeVideo}
+        onTogglePause={toggleVideoPause}
+      />
     </SafeAreaView>
   );
 }
@@ -258,6 +340,21 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 20,
     left: 20,
+  },
+  premiumBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFD700',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 8,
+    gap: 4,
+  },
+  premiumText: {
+    color: '#0F0F1E',
+    fontSize: 12,
+    fontWeight: '700',
   },
   ratingBadge: {
     flexDirection: 'row',

@@ -73,6 +73,56 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+/**
+ * Release signing credentials.
+ *
+ * Prefer android/key.properties (git-ignored) so passwords stay out of
+ * version control. The -P flags are kept as a fallback for CI, where the
+ * secrets come from environment variables instead of a file.
+ */
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def hasReleaseKeystore =
+        keystoreProperties.containsKey("storeFile") ||
+                project.hasProperty("IFTV_UPLOAD_STORE_FILE")
+
+def resolveStoreFile = {
+    if (keystoreProperties.containsKey("storeFile")) {
+        return file(keystoreProperties["storeFile"])
+    }
+    if (project.hasProperty("IFTV_UPLOAD_STORE_FILE")) {
+        return file(IFTV_UPLOAD_STORE_FILE)
+    }
+    return null
+}
+
+def resolveStorePassword = {
+    if (keystoreProperties.containsKey("storePassword")) {
+        return keystoreProperties["storePassword"]
+    }
+    return project.hasProperty("IFTV_UPLOAD_STORE_PASSWORD")
+            ? IFTV_UPLOAD_STORE_PASSWORD
+            : null
+}
+
+def resolveKeyAlias = {
+    if (keystoreProperties.containsKey("keyAlias")) {
+        return keystoreProperties["keyAlias"]
+    }
+    return project.hasProperty("IFTV_UPLOAD_KEY_ALIAS") ? IFTV_UPLOAD_KEY_ALIAS : null
+}
+
+def resolveKeyPassword = {
+    if (keystoreProperties.containsKey("keyPassword")) {
+        return keystoreProperties["keyPassword"]
+    }
+    return project.hasProperty("IFTV_UPLOAD_KEY_PASSWORD") ? IFTV_UPLOAD_KEY_PASSWORD : null
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -83,8 +133,8 @@ android {
         applicationId "com.iftvott"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 50
-        versionName "50.0"
+        versionCode 52
+        versionName "52.0"
     }
     signingConfigs {
         debug {
@@ -93,15 +143,26 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            // Populated only when real upload credentials are available.
+            // Leaving these null is what makes Play Console reject the bundle,
+            // so the build falls back to the debug key with a loud warning.
+            if (hasReleaseKeystore) {
+                storeFile resolveStoreFile()
+                storePassword resolveStorePassword()
+                keyAlias resolveKeyAlias()
+                keyPassword resolveKeyPassword()
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseKeystore
+                    ? signingConfigs.release
+                    : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
@@ -117,22 +178,26 @@ dependencies {
     }
 }
 
-android {
-    defaultConfig {  }
-    signingConfigs {
-        release {
-            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
-                storeFile file(MYAPP_UPLOAD_STORE_FILE)
-                storePassword MYAPP_UPLOAD_STORE_PASSWORD
-                keyAlias MYAPP_UPLOAD_KEY_ALIAS
-                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
-            }
-        }
+// A release bundle signed with the debug key is rejected by Play Console.
+// Warn at build time rather than letting the upload be refused later.
+// Declared here so it runs after hasReleaseKeystore is assigned.
+gradle.taskGraph.whenReady { graph ->
+    def wantsRelease = graph.allTasks.any {
+        it.name.toLowerCase().contains("release") && !it.name.toLowerCase().contains("jsand")
     }
-    buildTypes {
-        release {
-            
-            signingConfig signingConfigs.release
-        }
+    if (wantsRelease && !hasReleaseKeystore) {
+        logger.warn(
+                "\n=============================================================\n" +
+                        "WARNING: No release keystore configured.\n" +
+                        "  This build will be signed with the DEBUG key and Play\n" +
+                        "  Console WILL reject the upload.\n" +
+                        "\n" +
+                        "  1. Generate an upload key:\n" +
+                        "     keytool -genkey -v -keystore android/app/iftv-upload.keystore \\\n" +
+                        "       -alias iftv-upload -keyalg RSA -keysize 2048 -validity 10000\n" +
+                        "\n" +
+                        "  2. Copy android/key.properties.example to android/key.properties\n" +
+                        "     and fill in the values.\n" +
+                        "=============================================================\n")
     }
 }

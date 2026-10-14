@@ -6,10 +6,9 @@ import React, {
   useMemo,
 } from 'react';
 import authService from '../api/auth';
+import { BASE_URL } from '../api/config';
 
 const PlayerContext = createContext();
-
-const BASE_URL = 'https://iftv.nvsricemart.com/iftv-ott';
 
 // Mirrors the URL handling in api/movies.js so the player accepts the same
 // absolute or relative paths the movie list produces.
@@ -35,7 +34,9 @@ export function buildVideoSource(url) {
   const source = { uri: resolved };
   try {
     const token = authService.getCurrentUser()?.authToken;
-    if (token && resolved.includes('iftv-ott.onrender.com')) {
+    // Attach the bearer token to streams served from our own origin (so the
+    // ExoPlayer fetch is authenticated too).
+    if (token && resolved.includes(new URL(BASE_URL).hostname)) {
       source.headers = { Authorization: `Bearer ${token}` };
     }
   } catch (e) {

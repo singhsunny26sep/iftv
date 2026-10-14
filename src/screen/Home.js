@@ -24,7 +24,9 @@ import { useNavigation } from '@react-navigation/native'
 import {
   fetchAllMovies,
   fetchMovieCategories,
-  formatMovieForUI
+  formatMovieForUI,
+  isMoviePlayable,
+  lockCallToAction,
 } from '../api/movies'
 import { usePlayer } from '../contexts/PlayerContext'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -157,6 +159,14 @@ const MovieCard = ({ item, onPlay, size = 'medium' }) => {
           <Text style={styles.movieRating}>{item.rating || 'N/A'}</Text>
         </View>
 
+        {/* Free / paid lock badge (app-api.md §5) */}
+        {item.isLocked && (
+          <View style={styles.movieLockBadge}>
+            <Icon name="lock-closed" size={10} color="#0F0F1E" />
+            <Text style={styles.movieLockText}>Premium</Text>
+          </View>
+        )}
+
         {/* Hover overlay with play button */}
         <Animated.View style={[styles.movieOverlay, { opacity: overlayAnim }]}>
           <LinearGradient
@@ -263,7 +273,6 @@ export default function Home() {
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current
   const headerOpacity = useRef(new Animated.Value(0)).current
-  const scrollY = useRef(new Animated.Value(0)).current
 
   // ============================================================
   // ✅ UNIQUE DATA DISTRIBUTION - No Repetition
@@ -321,12 +330,6 @@ export default function Home() {
     ]).start()
   }, [fadeAnim, headerOpacity])
 
-  useEffect(() => {
-    if (Object.keys(categoryIds).length > 0) {
-      filterMoviesByCategory(selectedCategory)
-    }
-  }, [selectedCategory, categoryIds, filterMoviesByCategory])
-
   const filterMoviesByCategory = useCallback(async (category) => {
     try {
       setIsLoading(true)
@@ -347,6 +350,25 @@ export default function Home() {
       setIsLoading(false)
     }
   }, [categoryIds])
+
+  // Declared above the effect on purpose: reading it in the dependency array
+  // before the `const` exists only worked because the RN Babel preset downlevels
+  // block scoping. It also made the effect non-idempotent — every loadData
+  // produces a new `categoryIds` object, so each mount and pull-to-refresh
+  // fired a duplicate category-filtered fetch on top of loadData's own.
+  const didSeedInitialList = useRef(false)
+  useEffect(() => {
+    if (Object.keys(categoryIds).length === 0) {
+      return
+    }
+    if (!didSeedInitialList.current) {
+      // loadData already fetched the unfiltered list; re-filtering here only
+      // duplicated that request on every mount and pull-to-refresh.
+      didSeedInitialList.current = true
+      return
+    }
+    filterMoviesByCategory(selectedCategory)
+  }, [selectedCategory, categoryIds, filterMoviesByCategory])
 
   const handleCategorySelect = (category) => {
     setSelectedCategory(category)
@@ -393,11 +415,35 @@ export default function Home() {
   }, [])
 
   // Playback lives in PlayerContext so the Play tab renders the same session.
+  // Gated by the free/paid lock rules from app-api.md §5.
   const handlePlayMovie = (movie) => {
     if (!movie) {
       Alert.alert('Error', 'No movie selected.')
       return
     }
+
+    if (!isMoviePlayable(movie)) {
+      const cta = lockCallToAction(movie)
+      if (movie.isLocked) {
+        switch (cta?.action) {
+          case 'subscribe':
+            navigation.navigate('Subscription')
+            return
+          case 'login':
+            // login_required only happens for unauthenticated flows; this stack
+            // is behind the auth gate, so just inform the user instead of
+            // navigating to a route (Login) that isn't registered here.
+            Alert.alert('Login karke dekho', 'Sign in to unlock this title.')
+            return
+          default:
+            Alert.alert('Locked', 'This title requires a subscription.')
+            return
+        }
+      }
+      Alert.alert('Error', 'No video URL available for this title.')
+      return
+    }
+
     const videoUrl = movie.videoUrl || movie.url || movie.video
     if (!videoUrl || videoUrl.trim() === '') {
       Alert.alert('Error', 'No video URL available for this title.')
@@ -511,11 +557,6 @@ export default function Home() {
             colors={['#6C63FF']}
           />
         }
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: true }
-        )}
-        scrollEventThrottle={16}
       >
         {/* ===== Hero Section ===== */}
         {heroMovie && heroMovie.videoUrl ? (
@@ -1112,10 +1153,27 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: 4,
   },
-  movieRating: {
+   movieRating: {
     color: '#FFD700',
     fontSize: isSmallPhone ? 10 : 12,
     fontWeight: '600',
+  },
+  movieLockBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFD700',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  movieLockText: {
+    color: '#0F0F1E',
+    fontSize: isSmallPhone ? 10 : 12,
+    fontWeight: '700',
   },
   moviePlayButton: {
     position: 'absolute',

@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { CommonActions, useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 
 const { width } = Dimensions.get('window');
@@ -94,14 +94,34 @@ const ProfileScreen = ({ navigation }) => {
 
   const menuItems = [
     {
+      icon: 'image-outline',
+      label: 'Gallery',
+      onPress: () => navigation.navigate('Gallery'),
+    },
+    {
       icon: 'person-outline',
       label: 'Edit Profile',
       onPress: () => navigation.navigate('EditProfile'),
     },
     {
+      icon: 'receipt-outline',
+      label: 'My Tickets',
+      onPress: () => navigation.navigate('Tickets'),
+    },
+    {
       icon: 'diamond-outline',
       label: 'Subscription',
       onPress: () => navigation.navigate('Subscription'),
+    },
+    {
+      icon: 'shield-checkmark-outline',
+      label: 'My Plan',
+      onPress: () => navigation.navigate('MyPlan'),
+    },
+    {
+      icon: 'receipt-outline',
+      label: 'Transactions',
+      onPress: () => navigation.navigate('Transactions'),
     },
     {
       icon: 'heart-outline',
@@ -137,12 +157,9 @@ const ProfileScreen = ({ navigation }) => {
         text: 'Logout',
         style: 'destructive',
         onPress: async () => {
+          // Clearing the session flips isAuthenticated, and the navigator guard
+          // swaps to the auth stack and lands on Login on its own.
           await logout();
-          // The stack picks its initial route once on mount, so a manual
-          // reset is needed to actually land back on Login after signing out.
-          navigation
-            .getRoot()
-            .dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] }));
         },
       },
     ]);
